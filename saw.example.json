@@ -1,0 +1,15 @@
+{
+  "apps": {
+    "main": {
+      "android": "com.example.app",
+      "ios": "com.example.app"
+    },
+    "admin": {
+      "android": "com.example.admin",
+      "ios": "com.example.admin"
+    }
+  },
+  "areas": ["api", "auth", "payments", "push", "ui"],
+  "android": { "tag": "Example{Area}" },
+  "ios": { "subsystem": "{bundle}" }
+}
