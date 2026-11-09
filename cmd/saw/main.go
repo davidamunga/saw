@@ -8,8 +8,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,6 +26,51 @@ import (
 )
 
 var version = "dev" // set at release time
+
+// Where commands read and write; tests swap them.
+var (
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+	stdin  io.Reader = os.Stdin
+)
+
+// versionString is the release version, or for `go install` builds the module version Go
+// recorded, or for local builds "dev" and the commit.
+func versionString() string {
+	if version != "dev" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return version
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return strings.TrimPrefix(v, "v")
+	}
+	rev, dirty := "", ""
+	for _, s := range info.Settings {
+		switch {
+		case s.Key == "vcs.revision" && len(s.Value) >= 7:
+			rev = s.Value[:7]
+		case s.Key == "vcs.modified" && s.Value == "true":
+			dirty = ", modified"
+		}
+	}
+	if rev == "" {
+		return version
+	}
+	return fmt.Sprintf("%s (%s%s)", version, rev, dirty)
+}
+
+func isTerminal(v any) bool {
+	f, ok := v.(*os.File)
+	return ok && output.IsTerminal(f)
+}
+
+func wantColor(v any) bool {
+	f, ok := v.(*os.File)
+	return ok && output.WantColor(f)
+}
 
 const usage = `saw: stream a mobile app's logs from any Android or iOS device.
 
@@ -58,7 +105,7 @@ func main() {
 
 func runCLI(ctx context.Context, args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Print(usage)
+		fmt.Fprint(stdout, usage)
 		return nil
 	}
 	switch args[0] {
@@ -69,7 +116,7 @@ func runCLI(ctx context.Context, args []string) error {
 	case "doctor":
 		return doctorCmd(ctx, args[1:])
 	case "version", "--version":
-		fmt.Println("saw", version)
+		fmt.Fprintln(stdout, "saw", versionString())
 		return nil
 	}
 	return usageError{fmt.Errorf("unknown command %q (saw --help)", args[0])}
@@ -77,8 +124,8 @@ func runCLI(ctx context.Context, args []string) error {
 
 func newFlags(name string) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	fs.SetOutput(stderr)
+	fs.Usage = func() { fmt.Fprint(stderr, usage) }
 	return fs, fs.String("config", "", "path to saw.json")
 }
 
@@ -101,21 +148,21 @@ func devicesCmd(ctx context.Context, args []string) error {
 	}
 	devs, errs := device.List(ctx, *all)
 	for _, err := range errs {
-		fmt.Fprintln(os.Stderr, "saw:", err)
+		fmt.Fprintln(stderr, "saw:", err)
 	}
 	if *asJSON {
 		if devs == nil {
 			devs = []device.Device{}
 		}
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(devs)
 	}
 	if len(devs) == 0 {
-		fmt.Fprintln(os.Stderr, "no devices found (try saw doctor)")
+		fmt.Fprintln(stderr, "no devices found (try saw doctor)")
 		return nil
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "PLATFORM\tKIND\tNAME\tOS\tSTATE\tID")
 	for _, d := range devs {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", d.Platform, d.Kind, d.Name, d.OS, d.State, d.ID)
@@ -173,19 +220,19 @@ func streamCmd(ctx context.Context, args []string) error {
 	devs, errs := device.List(ctx, false)
 	dev, err := device.Pick(devs, *deviceQuery, *platform)
 	var amb *device.AmbiguousError
-	if errors.As(err, &amb) && output.IsTerminal(os.Stdin) {
+	if errors.As(err, &amb) && isTerminal(stdin) {
 		dev, err = choose(amb.Candidates)
 	}
 	if err != nil {
 		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, "saw:", e)
+			fmt.Fprintln(stderr, "saw:", e)
 		}
 		return err
 	}
 
-	var printer output.Printer = output.NewPretty(os.Stdout, output.WantColor(os.Stdout))
+	var printer output.Printer = output.NewPretty(stdout, wantColor(stdout))
 	if *asJSON {
-		printer = output.NewJSON(os.Stdout)
+		printer = output.NewJSON(stdout)
 	}
 
 	warnedPrivate := false
@@ -195,7 +242,7 @@ func streamCmd(ctx context.Context, args []string) error {
 		}
 		if !warnedPrivate && e.Platform == "ios" && strings.Contains(e.Message, "<private>") {
 			warnedPrivate = true
-			fmt.Fprintln(os.Stderr, "saw: iOS hides interpolated values as <private>; mark them `privacy: .public` in your Logger calls to see them")
+			fmt.Fprintln(stderr, "saw: iOS hides interpolated values as <private>; mark them `privacy: .public` in your Logger calls to see them")
 		}
 		printer.Print(e)
 	}
@@ -203,19 +250,19 @@ func streamCmd(ctx context.Context, args []string) error {
 		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
 		Areas: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all,
 		OnStart: func() {
-			fmt.Fprintf(os.Stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
+			fmt.Fprintf(stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
 		},
 	}, emit)
 }
 
 // choose asks which device to use when several fit.
 func choose(devs []device.Device) (device.Device, error) {
-	fmt.Fprintln(os.Stderr, "Which device?")
+	fmt.Fprintln(stderr, "Which device?")
 	for i, d := range devs {
-		fmt.Fprintf(os.Stderr, "  %d) %s  %s  %s\n", i+1, d.Name, d.OS, d.ID)
+		fmt.Fprintf(stderr, "  %d) %s  %s  %s\n", i+1, d.Name, d.OS, d.ID)
 	}
-	fmt.Fprint(os.Stderr, "> ")
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	fmt.Fprint(stderr, "> ")
+	line, _ := bufio.NewReader(stdin).ReadString('\n')
 	n, err := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil || n < 1 || n > len(devs) {
 		return device.Device{}, usageError{errors.New("no device chosen")}
@@ -232,7 +279,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if !doctor.Run(ctx, cfg, os.Stdout) {
+	if !doctor.Run(ctx, cfg, stdout) {
 		return errors.New("some checks failed")
 	}
 	return nil

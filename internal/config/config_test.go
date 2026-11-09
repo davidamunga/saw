@@ -71,3 +71,68 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 		t.Errorf("want an error naming the misspelled key, got %v", err)
 	}
 }
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), FileName)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestLoadErrors(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Error("missing file should fail")
+	}
+	if _, err := Load(writeConfig(t, `{"apps": `)); err == nil {
+		t.Error("broken JSON should fail")
+	}
+	if _, err := Load(writeConfig(t, `{"apps": {"a": {}}}`)); err == nil || !strings.Contains(err.Error(), "needs an android package or ios bundle id") {
+		t.Errorf("app with no ids: %v", err)
+	}
+}
+
+func TestLoadFindsNearest(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(`{"apps": {"only": {"android": "com.x"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(wd) })
+	sub := filepath.Join(dir, "a")
+	os.Mkdir(sub, 0o755)
+	os.Chdir(sub)
+	c, err := Load("")
+	if err != nil || c.Path == "" {
+		t.Fatalf("got %+v %v", c, err)
+	}
+	if app, err := c.App(""); err != nil || app.Name != "only" {
+		t.Errorf("the only app should be the default: %+v %v", app, err)
+	}
+	if _, err := c.App("other"); err == nil || !strings.Contains(err.Error(), "one of: only") {
+		t.Errorf("got %v", err)
+	}
+	os.Chdir(t.TempDir())
+	if c, err := Load(""); err != nil || c.Path != "" {
+		t.Errorf("no saw.json is fine: %+v %v", c, err)
+	}
+}
+
+func TestTemplates(t *testing.T) {
+	c := &Config{}
+	if _, err := c.App("nodots"); err == nil {
+		t.Error("a bare name with no saw.json should fail")
+	}
+	c.Android.Tag = "{area}-{AREA}"
+	if got := c.TagFor()("api"); got != "api-API" {
+		t.Error(got)
+	}
+	c.IOS.Subsystem = "{bundle}.log"
+	if got := c.Subsystem(App{IOS: "com.x"}); got != "com.x.log" {
+		t.Error(got)
+	}
+	if got := (&Config{}).Subsystem(App{IOS: "com.x"}); got != "" {
+		t.Errorf("no convention, no subsystem: %q", got)
+	}
+}

@@ -10,15 +10,21 @@ import (
 	"strings"
 )
 
+// Command and LookPath start and find tools. Tests replace them with fakes (see runtest).
+var (
+	Command  = exec.CommandContext
+	LookPath = exec.LookPath
+)
+
 // Has reports whether a tool is on PATH.
 func Has(name string) bool {
-	_, err := exec.LookPath(name)
+	_, err := LookPath(name)
 	return err == nil
 }
 
 // Output runs a tool to completion and returns its stdout. On failure, the error carries its stderr.
 func Output(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := Command(ctx, name, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -31,7 +37,7 @@ func Output(ctx context.Context, name string, args ...string) (string, error) {
 // Lines runs a tool and calls fn with each line of its stdout until the tool exits or ctx ends.
 // Ending through ctx (Ctrl-C) is not an error.
 func Lines(ctx context.Context, fn func(string), name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := Command(ctx, name, args...)
 	var stderr tail
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
