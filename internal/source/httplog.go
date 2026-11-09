@@ -110,6 +110,7 @@ func (h *httpLog) line(e event.Event) bool {
 		if w := h.take(url, key); w != nil {
 			w.n.Status, w.n.Failed, w.n.Error = cur.n.Status, cur.n.Failed, cur.n.Error
 			w.part, w.section, w.seen = partResponse, cur.section, now
+			w.finishedAt(cur.n.Time)
 			h.current[key] = w
 		} else {
 			cur.n.URL = url
@@ -135,6 +136,7 @@ func (h *httpLog) line(e event.Event) bool {
 		f := okFailRe.FindStringSubmatch(msg)
 		if b := h.take("", key); b != nil {
 			b.n.Failed, b.n.Error = true, f[1]
+			b.finishedAt(e.Time)
 			h.done(b)
 		}
 		return true
@@ -146,6 +148,7 @@ func (h *httpLog) line(e event.Event) bool {
 		}
 		h.finish(key)
 		b.n.Status, b.n.DurationMs = atoi(r[1]), atoi(r[3])
+		b.finishedAt(e.Time)
 		b.part, b.section, b.seen, b.lastLen = partResponse, "", now, 0
 		h.current[key] = b
 		return true
@@ -256,6 +259,14 @@ func (b *logBlock) hasHeader(name, value string) bool {
 		}
 	}
 	return false
+}
+
+// finishedAt records when a request's response (or failure) was logged.
+func (b *logBlock) finishedAt(t time.Time) {
+	if b.n.Started.IsZero() && b.n.Method != "" { // a response with no logged request has no start
+		b.n.Started = b.n.Time
+	}
+	b.n.Time = t
 }
 
 func (b *logBlock) addHeader(name, value string) {

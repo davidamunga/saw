@@ -78,7 +78,8 @@ Usage:
   saw devices [--all] [--json]
   saw stream  [--app <name|id>] [--scope a,b] [--device <id|name>] [--platform android|ios]
               [--level <level>] [--all] [--json]
-  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--full] [--json]
+  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--full | --curl | --json]
+              [--connections]
   saw doctor
   saw version
 
@@ -279,10 +280,15 @@ func netCmd(ctx context.Context, args []string) error {
 	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
 	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
 	platform := fs.String("platform", "", "android or ios")
-	full := fs.Bool("full", false, "show the headers and bodies of requests the app logs itself")
+	full := fs.Bool("full", false, "print requests the app logs as plain HTTP, with headers and bodies (.http file format)")
+	curl := fs.Bool("curl", false, "print requests the app logs as curl commands")
 	asJSON := fs.Bool("json", false, "print one JSON event per line")
+	connections := fs.Bool("connections", false, "keep showing connections after the app logs its first request")
 	if err := parse(fs, args); err != nil {
 		return err
+	}
+	if n := countTrue(*full, *curl, *asJSON); n > 1 {
+		return usageError{errors.New("pick one of --full, --curl and --json")}
 	}
 	cfg, app, err := loadApp(*cfgPath, *appName, *platform)
 	if err != nil {
@@ -293,8 +299,14 @@ func netCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	var printer output.NetPrinter = output.NewNetPretty(stdout, wantColor(stdout), *full)
-	if *asJSON {
+	switch {
+	case *asJSON:
 		printer = output.NewNetJSON(stdout)
+	case *curl:
+		printer = output.NewNetCurl(stdout)
+	}
+	if !*connections && !*asJSON {
+		printer = &quietConnections{next: printer}
 	}
 	return source.StreamNet(ctx, source.Spec{
 		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
@@ -302,6 +314,35 @@ func netCmd(ctx context.Context, args []string) error {
 			fmt.Fprintf(stderr, "saw: %s network on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
 		},
 	}, printer.Print)
+}
+
+func countTrue(bs ...bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n
+}
+
+// quietConnections drops connection-level lines once the app has logged a request: by then its
+// logged requests say more, and the connections are noise. Apps that log nothing keep them.
+type quietConnections struct {
+	next   output.NetPrinter
+	logged bool
+}
+
+func (q *quietConnections) Print(n event.Net) {
+	switch n.Kind {
+	case "logged":
+		q.logged = true
+	case "tcp", "udp", "dns", "tls", "request":
+		if q.logged {
+			return
+		}
+	}
+	q.next.Print(n)
 }
 
 // choose asks which device to use when several fit.

@@ -7,7 +7,8 @@ import "time"
 // hostnames of new connections, Android gives connections. On every platform, requests the
 // app logs itself (OkHttp-style, Ktor, Dio) come as kind "logged", with headers and bodies.
 type Net struct {
-	Time       time.Time `json:"time"`
+	Time       time.Time `json:"time"`             // when it happened; for requests, when they finished
+	Started    time.Time `json:"started,omitzero"` // kind "logged": when the request was sent
 	Platform   string    `json:"platform"`
 	Device     string    `json:"device"`
 	Kind       string    `json:"kind"`             // request | logged | http | tls | tcp | udp | dns | log

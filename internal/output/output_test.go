@@ -19,10 +19,10 @@ func TestPretty(t *testing.T) {
 	p.Print(event.Event{Time: at, Level: event.Info, Tag: "Main", Message: "onCreate"})
 	p.Print(event.Event{Time: at, Level: event.Error, Tag: "MainActivity", Message: "boom\n  at line 1\n"})
 	p.Print(event.Event{Time: at, Level: event.Debug, Tag: strings.Repeat("x", 30), Message: "long label"})
-	want := "09:41:02.114 I Main     onCreate\n" +
-		"09:41:02.114 E MainActivity boom\n" +
-		"                              at line 1\n" +
-		"09:41:02.114 D " + strings.Repeat("x", 30) + " long label\n"
+	want := "09:41:02.114 I Main               onCreate\n" +
+		"09:41:02.114 E MainActivity       boom\n" +
+		strings.Repeat(" ", 34) + "  at line 1\n" +
+		"09:41:02.114 D " + strings.Repeat("x", 17) + "~ long label\n"
 	if b.String() != want {
 		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
 	}

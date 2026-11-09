@@ -27,7 +27,12 @@ type Pretty struct {
 	width int
 }
 
-func NewPretty(w io.Writer, color bool) *Pretty { return &Pretty{w: w, color: color, width: 8} }
+// labelWidth is the width of the tag column; longer tags are cut, ending in ~.
+const labelWidth = 18
+
+func NewPretty(w io.Writer, color bool) *Pretty {
+	return &Pretty{w: w, color: color, width: labelWidth}
+}
 
 const (
 	reset  = "\x1b[0m"
@@ -62,8 +67,8 @@ func (p *Pretty) paint(color, s string) string {
 
 func (p *Pretty) Print(e event.Event) {
 	label := e.Label()
-	if n := len(label); n > p.width && n <= 24 {
-		p.width = n
+	if len(label) > p.width {
+		label = label[:p.width-1] + "~"
 	}
 	msgColor := ""
 	if e.Level >= event.Warn {

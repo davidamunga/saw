@@ -52,7 +52,8 @@ saw stream --app com.example.app --scope OkHttp,SyncWorker   # only these tags (
 saw stream --app com.example.app --device pixel --level warn
 saw stream --app com.example.app --json > session.jsonl
 saw net --app com.example.app                # the app's network requests and connections
-saw net --app com.example.app --full         # with the headers and bodies the app logs
+saw net --app com.example.app --full         # requests the app logs, as plain HTTP (.http files)
+saw net --app com.example.app --curl         # requests the app logs, as curl commands
 saw doctor                                   # what's missing, and how to fix it
 ```
 
@@ -74,7 +75,8 @@ With no `--device`, saw uses the only running device; with several, it asks whic
 `saw devices` takes `--all` (to include shut-down simulators) and `--json`.
 
 `saw net` takes `--app`, `--device`, `--platform`, `--json` and `--config`, the same as `saw stream`,
-and `--full` for the headers and bodies of requests the app logs itself.
+plus `--full` or `--curl` for the requests the app logs itself, and `--connections` to keep showing
+connections once it has logged a request.
 
 ### What "the app's own logs" means
 
@@ -120,11 +122,10 @@ without installing certificates. What it can see depends on the platform:
 | Android | each new **connection**, named by the hostnames the app's own log mentions (or reverse DNS), and the app's **HTTP log lines**: URLs, status codes, OkHttp's `-->`/`<--` | the kernel's socket table, which adb can read, and the app's log |
 
 ```
-09:41:02.380 200  https://api.example.com/v1/orders  538ms h2 3.3 KB     (simulator)
-09:41:02.114 TLS  api.example.com:443  203.0.113.7                         (iPhone)
-09:41:02.918 200  (connection 1)  605ms h2 3.3 KB                         (iPhone)
-09:41:03.002 TCP  api.example.com:443  203.0.113.7                         (Android)
-09:41:03.010 LOG  OkHttp --> GET https://api.example.com/v1/orders         (Android)
+09:41:02.114  TLS                         api.example.com:443  203.0.113.7             (iPhone)
+09:41:02.918  REQ    200   605ms  3.3 KB  (connection 1)  h2                          (iPhone)
+09:41:03.002  TCP                         api.example.com:443  203.0.113.7             (Android)
+09:41:03.380  REQ    200   538ms  3.3 KB  https://api.example.com/v1/orders  h2       (simulator)
 ```
 
 HTTPS stays encrypted on the network: there, you see where an app connects and how requests went.
@@ -138,11 +139,41 @@ like it on iOS. `saw net` assembles those logs into one line per request, on eve
 under any tag or category, and `--full` adds the headers and bodies:
 
 ```
-09:41:02.380 POST https://api.example.com/v1/orders  201  412ms
-    → Content-Type: application/json
-    → {"item":"1042"}
-    ← content-type: application/json
-    ← {"id":"ord_88","status":"created"}
+09:41:02.792  GET    200  1188ms    97 B  https://api.example.com/mobile-config
+09:41:03.380  POST   201   412ms    34 B  https://api.example.com/v1/orders
+```
+
+Each line has the same columns: time, method, status, duration, size, and the full URL last, so
+it stays aligned and copies cleanly. Once the app has logged a request, connection lines stop;
+`--connections` keeps them.
+
+`--full` prints each request as plain HTTP, in the `.http` file format that VS Code's REST Client
+and JetBrains' HTTP Client can send again; everything else becomes `#` comments:
+
+```
+### 09:41:03.380  POST 201  412ms
+POST https://api.example.com/v1/orders
+Content-Type: application/json
+
+{
+  "item": "1042"
+}
+
+HTTP 201
+content-type: application/json
+
+{
+  "id": "ord_88",
+  "status": "created"
+}
+```
+
+`--curl` prints each as a curl command instead:
+
+```sh
+curl -X POST 'https://api.example.com/v1/orders' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"item":"1042"}'
 ```
 
 It knows three formats:
@@ -155,8 +186,10 @@ It knows three formats:
 
 Other HTTP-looking lines the app logs (a URL, or a status code) appear as `LOG` lines. What you see
 is what the app logs: its log level decides whether headers and bodies are included (OkHttp's
-`Level.BODY`), and its own redaction (`Authorization: ██`) stays. iOS caps each log message at
-about 1 KB, so long bodies there are cut short. An app that doesn't log its requests shows only the
+`Level.BODY`), and its own redaction (`Authorization: ██`) stays. Logs cap each message's size,
+about 4 KB on Android unless the app splits long bodies (OkHttp's own logger does) and about 1 KB
+on iOS, so long bodies can be cut short; `--full` says so when a body is shorter than its
+`Content-Length`. An app that doesn't log its requests shows only the
 network view above.
 
 ## saw.json

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/davidamunga/saw/internal/device"
+	"github.com/davidamunga/saw/internal/event"
 	"github.com/davidamunga/saw/internal/runtest"
 )
 
@@ -258,11 +259,17 @@ func TestNet(t *testing.T) {
 	runtest.Install(t, rules...)
 	t.Chdir(t.TempDir())
 	out, errOut, err := saw(t, "", "net", "--app", "com.example.app")
-	if err != nil || !strings.Contains(out, "TCP  203.0.113.9:443") || !strings.Contains(errOut, "network on Pixel 8") {
+	if err != nil || !strings.Contains(out, "TCP                         203.0.113.9:443") || !strings.Contains(errOut, "network on Pixel 8") {
 		t.Errorf("got %q %q %v", out, errOut, err)
 	}
-	if out, _, err := saw(t, "", "net", "--app", "com.example.app", "--full"); err != nil || !strings.Contains(out, "TCP  203.0.113.9:443") {
+	if out, _, err := saw(t, "", "net", "--app", "com.example.app", "--full"); err != nil || !strings.HasPrefix(out, "# ") || !strings.Contains(out, "203.0.113.9:443") {
 		t.Errorf("--full: %q %v", out, err)
+	}
+	if out, _, err := saw(t, "", "net", "--app", "com.example.app", "--curl"); err != nil || !strings.HasPrefix(out, "# ") {
+		t.Errorf("--curl: %q %v", out, err)
+	}
+	if _, _, err := saw(t, "", "net", "--app", "com.example.app", "--full", "--json"); !isUsage(err) {
+		t.Errorf("two formats: want a usage error, got %v", err)
 	}
 	out, _, _ = saw(t, "", "net", "--app", "com.example.app", "--json")
 	if !strings.Contains(out, `"kind":"tcp"`) || !strings.Contains(out, `"ip":"203.0.113.9"`) {
@@ -277,3 +284,18 @@ func TestNet(t *testing.T) {
 		t.Error("no iOS device should fail")
 	}
 }
+
+func TestQuietConnections(t *testing.T) {
+	var got []string
+	q := &quietConnections{next: printFunc(func(n event.Net) { got = append(got, n.Kind) })}
+	for _, k := range []string{"tcp", "dns", "logged", "tcp", "tls", "request", "log", "logged"} {
+		q.Print(event.Net{Kind: k})
+	}
+	if strings.Join(got, ",") != "tcp,dns,logged,log,logged" {
+		t.Errorf("connections should stop once the app logs a request: %v", got)
+	}
+}
+
+type printFunc func(event.Net)
+
+func (f printFunc) Print(n event.Net) { f(n) }
