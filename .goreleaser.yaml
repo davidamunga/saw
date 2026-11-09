@@ -1,0 +1,54 @@
+# Release builds: `git tag vX.Y.Z && git push --tags` runs .github/workflows/release.yml, which runs this.
+# Local dry run: goreleaser release --snapshot --clean
+version: 2
+project_name: saw
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - main: ./cmd/saw
+    binary: saw
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE, saw.example.json]
+
+release:
+  github:
+    owner: davidamunga
+    name: saw
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+# brew install davidamunga/tap/saw
+homebrew_casks:
+  - name: saw
+    repository:
+      owner: davidamunga
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/davidamunga/saw
+    description: Stream a mobile app's logs from any Android or iOS device, emulator or simulator.
+    # The binary isn't signed or notarized: clear the quarantine flag so macOS will run it.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/saw"]
+          end
