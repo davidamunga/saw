@@ -11,11 +11,15 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/davidamunga/saw/internal/config"
 	"github.com/davidamunga/saw/internal/device"
@@ -76,12 +80,19 @@ const usage = `saw: a mobile app's logs and network requests, from any Android o
 
 Usage:
   saw devices [--all] [--json]
-  saw stream  [--app <name|id>] [--scope a,b] [--device <id|name>] [--platform android|ios]
-              [--level <level>] [--all] [--json]
-  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--full | --curl | --json]
-              [--connections]
+  saw stream  [--app <name|id>] [--scope a,b] [--level <level>] [--exclude-tag a,b] [--all] [--json]
+              [watch flags]
+  saw net     [--app <name|id>] [--full | --curl | --json] [--connections] [watch flags]
   saw doctor
   saw version
+
+Watch flags, for stream and net:
+  --device <id|name>    a device's id, id prefix or name; several with commas, or all
+  --platform <p>        android or ios
+  --since <when>        start back in time: 5m, 90s, or a clock time like 09:40
+  --grep <regexp>       only what matches (case-insensitive unless it has capitals)
+  --until <regexp>      stop after the first match; fail if nothing matches
+  --for <duration>      stop after this long: 10s, 2m
 
 Every command takes --config <path> (default: the nearest saw.json).
 `
@@ -191,10 +202,10 @@ func (l *listFlag) Set(v string) error {
 func streamCmd(ctx context.Context, args []string) error {
 	fs, cfgPath := newFlags("stream")
 	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
-	var scopes listFlag
+	var scopes, exclude listFlag
 	fs.Var(&scopes, "scope", "only these scopes (comma list, repeatable)")
-	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
-	platform := fs.String("platform", "", "android or ios")
+	fs.Var(&exclude, "exclude-tag", "hide these tags or categories (comma list, repeatable)")
+	wf := addWatchFlags(fs)
 	levelName := fs.String("level", "verbose", "lowest level to show: verbose, debug, info, warn, error, fatal")
 	all := fs.Bool("all", false, "everything the app's process logs, not only its own lines")
 	asJSON := fs.Bool("json", false, "print one JSON event per line")
@@ -205,7 +216,11 @@ func streamCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return usageError{err}
 	}
-	cfg, app, err := loadApp(*cfgPath, *appName, *platform)
+	w, err := wf.parse(time.Now())
+	if err != nil {
+		return err
+	}
+	cfg, app, err := loadApp(*cfgPath, *appName, *wf.platform)
 	if err != nil {
 		return err
 	}
@@ -213,34 +228,51 @@ func streamCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return usageError{err}
 	}
-	dev, err := pickDevice(ctx, *deviceQuery, *platform)
-	if err != nil {
+	if w.devs, err = pickDevices(ctx, *wf.device, *wf.platform, app); err != nil {
 		return err
 	}
 
-	var printer output.Printer = output.NewPretty(stdout, wantColor(stdout))
+	var printer output.Printer
 	if *asJSON {
 		printer = output.NewJSON(stdout)
+	} else {
+		p := output.NewPretty(stdout, wantColor(stdout))
+		if len(w.devs) > 1 {
+			p.ShowDevice(w.deviceWidth())
+		}
+		printer = p
 	}
 
 	warnedPrivate := false
 	emit := func(e event.Event) {
-		if e.Level < minLevel {
+		if e.Level < minLevel || hasTag(e, exclude) {
 			return
 		}
-		if !warnedPrivate && e.Platform == "ios" && strings.Contains(e.Message, "<private>") {
-			warnedPrivate = true
-			fmt.Fprintln(stderr, "saw: iOS hides interpolated values as <private>; mark them `privacy: .public` in your Logger calls to see them")
-		}
-		printer.Print(e)
+		w.emit(e.Time, e.Label()+" "+e.Message, func() {
+			if !warnedPrivate && e.Platform == "ios" && strings.Contains(e.Message, "<private>") {
+				warnedPrivate = true
+				fmt.Fprintln(stderr, "saw: iOS hides interpolated values as <private>; mark them `privacy: .public` in your Logger calls to see them")
+			}
+			printer.Print(e)
+		})
 	}
-	return source.Stream(ctx, source.Spec{
-		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
-		Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all,
-		OnStart: func() {
-			fmt.Fprintf(stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
-		},
-	}, emit)
+	return w.run(ctx, app.Name, func(ctx context.Context, dev device.Device) error {
+		return source.Stream(ctx, source.Spec{
+			Device: dev, App: app, Subsystem: cfg.Subsystem(app),
+			Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all, Since: w.since,
+			OnStart: w.onStart(app.Name, dev), OnLive: w.onLive(dev),
+		}, emit)
+	})
+}
+
+// hasTag reports whether a line's tag, category or scope is one of tags.
+func hasTag(e event.Event, tags []string) bool {
+	for _, t := range tags {
+		if strings.EqualFold(t, e.Tag) || strings.EqualFold(t, e.Category) || strings.EqualFold(t, e.Scope) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadApp reads saw.json and resolves --app, after checking --platform.
@@ -278,8 +310,7 @@ func pickDevice(ctx context.Context, query, platform string) (device.Device, err
 func netCmd(ctx context.Context, args []string) error {
 	fs, cfgPath := newFlags("net")
 	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
-	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
-	platform := fs.String("platform", "", "android or ios")
+	wf := addWatchFlags(fs)
 	full := fs.Bool("full", false, "print requests the app logs as plain HTTP, with headers and bodies (.http file format)")
 	curl := fs.Bool("curl", false, "print requests the app logs as curl commands")
 	asJSON := fs.Bool("json", false, "print one JSON event per line")
@@ -290,12 +321,15 @@ func netCmd(ctx context.Context, args []string) error {
 	if n := countTrue(*full, *curl, *asJSON); n > 1 {
 		return usageError{errors.New("pick one of --full, --curl and --json")}
 	}
-	cfg, app, err := loadApp(*cfgPath, *appName, *platform)
+	w, err := wf.parse(time.Now())
 	if err != nil {
 		return err
 	}
-	dev, err := pickDevice(ctx, *deviceQuery, *platform)
+	cfg, app, err := loadApp(*cfgPath, *appName, *wf.platform)
 	if err != nil {
+		return err
+	}
+	if w.devs, err = pickDevices(ctx, *wf.device, *wf.platform, app); err != nil {
 		return err
 	}
 	var printer output.NetPrinter = output.NewNetPretty(stdout, wantColor(stdout), *full)
@@ -305,15 +339,29 @@ func netCmd(ctx context.Context, args []string) error {
 	case *curl:
 		printer = output.NewNetCurl(stdout)
 	}
+	if p, ok := printer.(interface{ ShowDevice(int) }); ok && len(w.devs) > 1 {
+		p.ShowDevice(w.deviceWidth())
+	}
 	if !*connections && !*asJSON {
 		printer = &quietConnections{next: printer}
 	}
-	return source.StreamNet(ctx, source.Spec{
-		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
-		OnStart: func() {
-			fmt.Fprintf(stderr, "saw: %s network on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
-		},
-	}, printer.Print)
+	emit := func(n event.Net) { w.emit(n.Time, netText(n), func() { printer.Print(n) }) }
+	return w.run(ctx, app.Name+" network", func(ctx context.Context, dev device.Device) error {
+		return source.StreamNet(ctx, source.Spec{
+			Device: dev, App: app, Subsystem: cfg.Subsystem(app), Since: w.since,
+			OnStart: w.onStart(app.Name+" network", dev), OnLive: w.onLive(dev),
+		}, emit)
+	})
+}
+
+// netText is what --grep and --until match in a network event.
+func netText(n event.Net) string {
+	parts := []string{n.Method}
+	if n.Status > 0 {
+		parts = append(parts, strconv.Itoa(n.Status))
+	}
+	parts = append(parts, n.URL, n.Host, n.IP, n.Tag, n.Log, n.Error, n.RequestBody, n.ResponseBody)
+	return strings.Join(parts, " ")
 }
 
 func countTrue(bs ...bool) int {
@@ -326,19 +374,23 @@ func countTrue(bs ...bool) int {
 	return n
 }
 
-// quietConnections drops connection-level lines once the app has logged a request: by then its
-// logged requests say more, and the connections are noise. Apps that log nothing keep them.
+// quietConnections drops a device's connection-level lines once the app on it has logged a
+// request: by then its logged requests say more, and the connections are noise. Apps that log
+// nothing keep them.
 type quietConnections struct {
 	next   output.NetPrinter
-	logged bool
+	logged map[string]bool // by device
 }
 
 func (q *quietConnections) Print(n event.Net) {
 	switch n.Kind {
 	case "logged":
-		q.logged = true
+		if q.logged == nil {
+			q.logged = map[string]bool{}
+		}
+		q.logged[n.Device] = true
 	case "tcp", "udp", "dns", "tls", "request":
-		if q.logged {
+		if q.logged[n.Device] {
 			return
 		}
 	}
@@ -373,4 +425,304 @@ func doctorCmd(ctx context.Context, args []string) error {
 		return errors.New("some checks failed")
 	}
 	return nil
+}
+
+// watchFlags are the flags stream and net share: which devices, how far back, which lines, and
+// when to stop.
+type watchFlags struct {
+	device, platform, since, grep, until *string
+	dur                                  *time.Duration
+}
+
+func addWatchFlags(fs *flag.FlagSet) *watchFlags {
+	return &watchFlags{
+		device:   fs.String("device", "", "device id, id prefix or name; several with commas, or all"),
+		platform: fs.String("platform", "", "android or ios"),
+		since:    fs.String("since", "", "start back in time: a duration (5m) or a clock time (09:40)"),
+		grep:     fs.String("grep", "", "only what matches this regular expression (case-insensitive unless it has capitals)"),
+		until:    fs.String("until", "", "stop after the first match of this regular expression; fail if nothing matches"),
+		dur:      fs.Duration("for", 0, "stop after this long (10s, 2m)"),
+	}
+}
+
+func (f *watchFlags) parse(now time.Time) (*watch, error) {
+	w := &watch{dur: *f.dur}
+	if w.dur < 0 {
+		return nil, usageError{errors.New("--for must be positive")}
+	}
+	var err error
+	if w.since, err = parseSince(*f.since, now); err != nil {
+		return nil, usageError{err}
+	}
+	if w.grep, err = compileMatch("grep", *f.grep); err != nil {
+		return nil, err
+	}
+	w.untilText = *f.until
+	if w.until, err = compileMatch("until", *f.until); err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// parseSince reads --since: a duration back from now, or a clock time today (yesterday, if
+// that time hasn't come yet today).
+func parseSince(s string, now time.Time) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		if d <= 0 {
+			return time.Time{}, errors.New("--since must be positive")
+		}
+		return now.Add(-d), nil
+	}
+	for _, layout := range []string{"15:04:05", "15:04"} {
+		if c, err := time.Parse(layout, s); err == nil {
+			t := time.Date(now.Year(), now.Month(), now.Day(), c.Hour(), c.Minute(), c.Second(), 0, now.Location())
+			if t.After(now) {
+				t = t.AddDate(0, 0, -1)
+			}
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("--since wants a duration like 5m or a clock time like 09:40, not %q", s)
+}
+
+// compileMatch compiles a --grep or --until pattern, ignoring case unless it has capitals.
+func compileMatch(name, pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, nil
+	}
+	if pattern == strings.ToLower(pattern) {
+		pattern = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, usageError{fmt.Errorf("--%s: %v", name, err)}
+	}
+	return re, nil
+}
+
+// watch reads one or more devices at once, printing what --grep lets through, and stopping on
+// --until's first match or after --for.
+type watch struct {
+	devs        []device.Device
+	since       time.Time
+	grep, until *regexp.Regexp
+	untilText   string
+	dur         time.Duration
+	mu          sync.Mutex // one device's output at a time
+	matched     bool
+	expired     bool
+	cancel      context.CancelFunc
+
+	// With --since on several devices, each device's history arrives as one burst. Lines are
+	// held until every device has started, then printed in time order.
+	sorting bool
+	live    map[string]bool // devices whose history is in (or that failed)
+	held    []heldLine
+}
+
+type heldLine struct {
+	t     time.Time
+	text  string
+	print func()
+}
+
+// settleTime is how long after the last device goes live its history is waited for: logcat
+// sends its history and live lines as one stream.
+var settleTime = 1500 * time.Millisecond
+
+// wentLive counts a device as live (or failed). Once all are, --for's clock starts, and the held
+// lines are printed after settleTime. Call with w.mu held.
+func (w *watch) wentLive(id string) {
+	if w.live[id] {
+		return
+	}
+	w.live[id] = true
+	if len(w.live) < len(w.devs) {
+		return
+	}
+	if w.dur > 0 {
+		time.AfterFunc(w.dur, func() {
+			w.mu.Lock()
+			w.expired = true
+			w.mu.Unlock()
+			w.cancel()
+		})
+	}
+	if w.sorting {
+		time.AfterFunc(settleTime, func() {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			w.release()
+		})
+	}
+}
+
+// release prints the held lines in time order and stops holding. Call with w.mu held.
+func (w *watch) release() {
+	if !w.sorting {
+		return
+	}
+	w.sorting = false
+	sort.SliceStable(w.held, func(i, j int) bool { return w.held[i].t.Before(w.held[j].t) })
+	for _, l := range w.held {
+		w.show(l.text, l.print)
+	}
+	w.held = nil
+}
+
+func (w *watch) deviceWidth() int {
+	names := make([]string, len(w.devs))
+	for i, d := range w.devs {
+		names[i] = d.Name
+	}
+	return output.DeviceWidth(names)
+}
+
+// hint tells how the stream ends.
+func (w *watch) hint() string {
+	if w.dur > 0 {
+		return fmt.Sprintf(" (for %s)", w.dur)
+	}
+	return " (Ctrl-C to stop)"
+}
+
+// onStart reports a device ready.
+func (w *watch) onStart(what string, dev device.Device) func() {
+	return func() {
+		w.mu.Lock()
+		hint := ""
+		if len(w.devs) == 1 {
+			hint = w.hint()
+		}
+		fmt.Fprintf(stderr, "saw: %s on %s %s%s\n", what, dev.Name, dev.OS, hint)
+		w.mu.Unlock()
+	}
+}
+
+// onLive notes a device has printed its history.
+func (w *watch) onLive(dev device.Device) func() {
+	return func() {
+		w.mu.Lock()
+		w.wentLive(dev.ID)
+		w.mu.Unlock()
+	}
+}
+
+// emit prints a line from time t, with text being what --grep and --until match.
+func (w *watch) emit(t time.Time, text string, print func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sorting {
+		w.held = append(w.held, heldLine{t, text, print})
+		return
+	}
+	w.show(text, print)
+}
+
+// show prints a line unless --grep filters it out or --until already matched. Call with w.mu held.
+func (w *watch) show(text string, print func()) {
+	if w.matched || (w.grep != nil && !w.grep.MatchString(text)) {
+		return
+	}
+	print()
+	if w.until != nil && w.until.MatchString(text) {
+		w.matched = true
+		w.cancel()
+	}
+}
+
+// run reads every device, each with read, until they end, --until matches or --for is up. One
+// device failing doesn't stop the others.
+func (w *watch) run(ctx context.Context, what string, read func(context.Context, device.Device) error) error {
+	ctx, w.cancel = context.WithCancel(ctx)
+	defer w.cancel()
+	w.live = map[string]bool{}
+	if len(w.devs) == 1 {
+		if err := read(ctx, w.devs[0]); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(stderr, "saw: %s on %d devices%s\n", what, len(w.devs), w.hint())
+		w.sorting = !w.since.IsZero()
+		var wg sync.WaitGroup
+		failed := 0
+		for _, d := range w.devs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := read(ctx, d); err != nil {
+					w.mu.Lock()
+					failed++
+					fmt.Fprintf(stderr, "saw: %s: %v\n", d.Name, err)
+					w.wentLive(d.ID)
+					w.mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		if failed == len(w.devs) {
+			return errors.New("no device could be read")
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.release() // the devices ended before their history was printed
+	if w.until != nil && !w.matched {
+		if w.expired {
+			return fmt.Errorf("nothing matched --until %q in %s", w.untilText, w.dur)
+		}
+		return fmt.Errorf("nothing matched --until %q", w.untilText)
+	}
+	return nil
+}
+
+// pickDevices finds the devices --device names: one as pickDevice does, several separated by
+// commas, or all: every running device on a platform the app is configured for.
+func pickDevices(ctx context.Context, query, platform string, app config.App) ([]device.Device, error) {
+	if query != "all" && !strings.Contains(query, ",") {
+		d, err := pickDevice(ctx, query, platform)
+		if err != nil {
+			return nil, err
+		}
+		return []device.Device{d}, nil
+	}
+	devs, errs := device.List(ctx, false)
+	report := func() {
+		for _, e := range errs {
+			fmt.Fprintln(stderr, "saw:", e)
+		}
+	}
+	var picked []device.Device
+	if query == "all" {
+		for _, d := range devs {
+			if d.Ready && (platform == "" || d.Platform == platform) &&
+				(d.Platform == "android" && app.Android != "" || d.Platform == "ios" && app.IOS != "") {
+				picked = append(picked, d)
+			}
+		}
+		if len(picked) == 0 {
+			report()
+			return nil, fmt.Errorf("no running device for %s (try `saw devices`)", app.Name)
+		}
+		return picked, nil
+	}
+	seen := map[string]bool{}
+	for _, q := range strings.Split(query, ",") {
+		if q = strings.TrimSpace(q); q == "" {
+			continue
+		}
+		d, err := device.Pick(devs, q, platform)
+		if err != nil {
+			report()
+			return nil, err
+		}
+		if !seen[d.ID] {
+			seen[d.ID] = true
+			picked = append(picked, d)
+		}
+	}
+	return picked, nil
 }

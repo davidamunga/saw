@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/davidamunga/saw/internal/config"
 	"github.com/davidamunga/saw/internal/device"
@@ -20,12 +21,24 @@ type Spec struct {
 	Chosen    bool                // Scopes were picked with --scope, not just every configured scope
 	TagFor    func(string) string // Android: scope → logcat tag; nil when the project has none
 	All       bool                // everything the app's process logs, not only its own lines
+	Since     time.Time           // start this far back in the device's log; zero = from now
 	OnStart   func()              // called once the app is found, just before lines start
+	OnLive    func()              // called once the lines from Since are read and live ones follow
 }
 
+// started calls OnStart, and OnLive too unless the source reads its history separately first.
 func (s Spec) started() {
 	if s.OnStart != nil {
 		s.OnStart()
+	}
+	if s.Since.IsZero() || s.Device.Kind != "simulator" {
+		s.live()
+	}
+}
+
+func (s Spec) live() {
+	if s.OnLive != nil {
+		s.OnLive()
 	}
 }
 
@@ -56,7 +69,19 @@ func (s Spec) checkIOS() error {
 	if s.App.IOS == "" {
 		return fmt.Errorf("app %q has no ios bundle id in saw.json", s.App.Name)
 	}
+	if !s.Since.IsZero() && s.Device.Kind != "simulator" {
+		return fmt.Errorf("--since isn't available on %s: iPhones and iPads only stream live logs", s.Device.Name)
+	}
 	return nil
+}
+
+// logcatStart is logcat's -T value: from Since (as seconds since the epoch), or from the newest
+// line instead of replaying the whole buffer.
+func (s Spec) logcatStart() string {
+	if s.Since.IsZero() {
+		return "1"
+	}
+	return fmt.Sprintf("%d.%03d", s.Since.Unix(), s.Since.Nanosecond()/1e6)
 }
 
 // setScope names an iOS line's scope: its category, when it's in the app's own subsystem.

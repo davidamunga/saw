@@ -147,3 +147,28 @@ func TestNetJSON(t *testing.T) {
 		t.Errorf("empty fields should be left out: %s", b.String())
 	}
 }
+
+func TestNetDeviceColumn(t *testing.T) {
+	var b bytes.Buffer
+	p := NewNetPretty(&b, false, false)
+	p.ShowDevice(9)
+	n := logged
+	n.Device = "Pixel 8"
+	p.Print(n)
+	full := NewNetPretty(&b, false, true)
+	full.ShowDevice(9)
+	full.Print(n)
+	c := NewNetCurl(&b)
+	c.ShowDevice(9)
+	c.Print(n)
+	got := b.String()
+	for _, want := range []string{
+		"09:41:02.114  Pixel 8    POST   200   356ms   300 B  https://",
+		"### 09:41:02.114  Pixel 8  POST 200  356ms\n",
+		"# 09:41:02.114  Pixel 8  POST 200  356ms\ncurl",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}

@@ -56,11 +56,9 @@ func netSimulator(ctx context.Context, s Spec, emit func(event.Net)) error {
 	cf, logged := newCFNetwork(), newHTTPLog(send)
 	defer logged.start()()
 	s.started()
-	return run.Lines(ctx, func(line string) {
-		if e, ok := ParseUnifiedLog([]byte(line)); ok {
-			s.netIOSLine(e, cf, logged, send)
-		}
-	}, "xcrun", "simctl", "spawn", s.Device.ID, "log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
+	return simLog(ctx, s, predicate, func(e event.Event) {
+		s.netIOSLine(e, cf, logged, send)
+	})
 }
 
 // netIOSLine routes one iOS log line: Apple's networking logs become requests; the app's own
@@ -392,7 +390,7 @@ func netAndroid(ctx context.Context, s Spec, emit func(event.Net)) error {
 			}
 			names.learnFrom(ctx, e.Message)
 			appHTTPLog(e, logged, send)
-		}, "adb", append(logcat, "-T", "1")...)
+		}, "adb", append(logcat, "-T", s.logcatStart())...)
 	}()
 	go func() {
 		const script = "while true; do echo SAW-TCP; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; " +

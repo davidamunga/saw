@@ -25,6 +25,7 @@ type Pretty struct {
 	w     io.Writer
 	color bool
 	width int
+	dev   int // the device column's width; 0 = no column
 }
 
 // labelWidth is the width of the tag column; longer tags are cut, ending in ~.
@@ -32,6 +33,26 @@ const labelWidth = 18
 
 func NewPretty(w io.Writer, color bool) *Pretty {
 	return &Pretty{w: w, color: color, width: labelWidth}
+}
+
+// ShowDevice adds a column naming each line's device, for streams from several devices.
+func (p *Pretty) ShowDevice(width int) { p.dev = width }
+
+// DeviceWidth is the device column's width for these names: the longest, up to 14.
+func DeviceWidth(names []string) int {
+	w := 0
+	for _, n := range names {
+		w = max(w, len(n))
+	}
+	return min(w, 14)
+}
+
+// fit pads s to width, or cuts it to width ending in ~.
+func fit(s string, width int) string {
+	if len(s) > width {
+		return s[:width-1] + "~"
+	}
+	return fmt.Sprintf("%-*s", width, s)
 }
 
 const (
@@ -66,24 +87,23 @@ func (p *Pretty) paint(color, s string) string {
 }
 
 func (p *Pretty) Print(e event.Event) {
-	label := e.Label()
-	if len(label) > p.width {
-		label = label[:p.width-1] + "~"
-	}
 	msgColor := ""
 	if e.Level >= event.Warn {
 		msgColor = levelColor(e.Level)
 	}
-	head := fmt.Sprintf("%s %s %s ",
-		p.paint(dim, e.Time.Format("15:04:05.000")),
-		p.paint(levelColor(e.Level), e.Level.Letter()),
-		p.paint(cyan, fmt.Sprintf("%-*s", p.width, label)))
-	indent := strings.Repeat(" ", 12+1+1+1+p.width+1)
+	head := p.paint(dim, e.Time.Format("15:04:05.000")) + " "
+	indent := 12 + 1
+	if p.dev > 0 {
+		head += fit(e.Device, p.dev) + " "
+		indent += p.dev + 1
+	}
+	head += fmt.Sprintf("%s %s ", p.paint(levelColor(e.Level), e.Level.Letter()), p.paint(cyan, fit(e.Label(), p.width)))
+	pad := strings.Repeat(" ", indent+1+1+p.width+1)
 	for i, line := range strings.Split(strings.TrimRight(e.Message, "\n"), "\n") {
 		if i == 0 {
 			fmt.Fprintln(p.w, head+p.paint(msgColor, line))
 		} else {
-			fmt.Fprintln(p.w, indent+p.paint(msgColor, line))
+			fmt.Fprintln(p.w, pad+p.paint(msgColor, line))
 		}
 	}
 }

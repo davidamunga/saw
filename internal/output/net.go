@@ -34,6 +34,19 @@ type NetPretty struct {
 	w     io.Writer
 	color bool
 	full  bool
+	dev   int // the device column's width; 0 = no column
+}
+
+// ShowDevice adds a column naming each event's device, for several devices at once.
+func (p *NetPretty) ShowDevice(width int) { p.dev = width }
+
+// when is an event's time, and its device when several are shown.
+func (p *NetPretty) when(n event.Net) string {
+	s := n.Time.Format("15:04:05.000")
+	if p.dev > 0 {
+		s += "  " + fit(n.Device, p.dev)
+	}
+	return s
 }
 
 func NewNetPretty(w io.Writer, color, full bool) *NetPretty {
@@ -71,7 +84,7 @@ func (p *NetPretty) summary(n event.Net) string {
 	}
 	target, extra := p.netTarget(n)
 	line := fmt.Sprintf("%s  %s %s %s %s  %s",
-		p.paint(dim, n.Time.Format("15:04:05.000")),
+		p.paint(dim, p.when(n)),
 		p.paint(cyan, fmt.Sprintf("%-6s", label)),
 		p.paint(color, fmt.Sprintf("%3s", status)),
 		p.paint(dim, fmt.Sprintf("%7s", duration)),
@@ -179,7 +192,7 @@ func (p *NetPretty) url(u string) string {
 //
 //	{ "auth": "a1b2" }
 func (p *NetPretty) httpMessage(n event.Net) {
-	head := fmt.Sprintf("### %s  %s", n.Time.Format("15:04:05.000"), strings.TrimSpace(p.plainColumns(n)))
+	head := fmt.Sprintf("### %s  %s", strings.TrimRight(p.when(n), " "), strings.TrimSpace(p.plainColumns(n)))
 	fmt.Fprintln(p.w, p.paint(dim, head))
 	method := n.Method
 	if method == "" {
@@ -251,17 +264,24 @@ func prettyBody(body string) string {
 
 // NetCurl prints each request the app logged as a curl command, to paste and send again, and
 // everything else as # comments.
-type NetCurl struct{ w io.Writer }
+type NetCurl struct {
+	w   io.Writer
+	dev int
+}
 
 func NewNetCurl(w io.Writer) *NetCurl { return &NetCurl{w: w} }
 
+// ShowDevice names each request's device, for several devices at once.
+func (c *NetCurl) ShowDevice(width int) { c.dev = width }
+
 func (c *NetCurl) Print(n event.Net) {
 	plain := NewNetPretty(c.w, false, false)
+	plain.dev = c.dev
 	if n.Kind != "logged" || n.URL == "" {
 		fmt.Fprintln(c.w, "# "+plain.summary(n))
 		return
 	}
-	fmt.Fprintf(c.w, "# %s  %s\n", n.Time.Format("15:04:05.000"), plain.plainColumns(n))
+	fmt.Fprintf(c.w, "# %s  %s\n", strings.TrimRight(plain.when(n), " "), plain.plainColumns(n))
 	first := "curl"
 	if n.Method != "" && n.Method != "GET" {
 		first += " -X " + n.Method

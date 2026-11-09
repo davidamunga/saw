@@ -25,8 +25,7 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 	}
 	uids := uidNames(uid)
 
-	// -T 1: start at the newest line instead of replaying the whole buffer.
-	args := []string{"-s", serial, "logcat", "-v", "threadtime", "-v", "year", "-v", "uid", "-T", "1"}
+	args := []string{"-s", serial, "logcat", "-v", "threadtime", "-v", "year", "-v", "uid", "-T", s.logcatStart()}
 	tagScope := map[string]string{}
 	if s.TagFor != nil {
 		for _, a := range s.Scopes {

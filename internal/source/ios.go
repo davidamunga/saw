@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/davidamunga/saw/internal/event"
@@ -18,25 +19,84 @@ func streamSimulator(ctx context.Context, s Spec, emit func(event.Event)) error 
 	if err := s.checkIOS(); err != nil {
 		return err
 	}
-	udid := s.Device.ID
 	process, err := simProcess(ctx, s)
 	if err != nil {
 		return err
 	}
 	predicate := simPredicate(s, process)
 	s.started()
-	return run.Lines(ctx, func(line string) {
-		e, ok := ParseUnifiedLog([]byte(line))
-		if !ok {
-			return
-		}
+	return simLog(ctx, s, predicate, func(e event.Event) {
 		if !s.keepIOS(e) {
 			return
 		}
 		e.Device = s.Device.Name
 		s.setScope(&e)
 		emit(e)
-	}, "xcrun", "simctl", "spawn", udid, "log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
+	})
+}
+
+// simLog reads a simulator's log lines that match predicate, live with `log stream`. With Since,
+// it first reads the lines from then until now with `log show`, while the live stream starts and
+// holds its lines back, so none are lost or shown twice between the two.
+func simLog(ctx context.Context, s Spec, predicate string, fn func(event.Event)) error {
+	sim := []string{"simctl", "spawn", s.Device.ID, "log"}
+	stream := append(sim, "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
+	if s.Since.IsZero() {
+		return run.Lines(ctx, func(line string) {
+			if e, ok := ParseUnifiedLog([]byte(line)); ok {
+				fn(e)
+			}
+		}, "xcrun", stream...)
+	}
+
+	var (
+		mu       sync.Mutex
+		held     []event.Event
+		caughtUp bool
+		last     time.Time // the newest line `log show` returned
+	)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	live := make(chan error, 1)
+	go func() {
+		live <- run.Lines(ctx, func(line string) {
+			e, ok := ParseUnifiedLog([]byte(line))
+			if !ok {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !caughtUp {
+				held = append(held, e)
+			} else if e.Time.After(last) {
+				fn(e)
+			}
+		}, "xcrun", stream...)
+	}()
+
+	start := s.Since.Local().Format("2006-01-02 15:04:05")
+	show := append(sim, "show", "--style", "ndjson", "--info", "--debug", "--start", start, "--predicate", predicate)
+	err := run.Lines(ctx, func(line string) {
+		if e, ok := ParseUnifiedLog([]byte(line)); ok && !e.Time.Before(s.Since) {
+			last = e.Time
+			fn(e)
+		}
+	}, "xcrun", show...)
+	if err != nil {
+		cancel()
+		<-live
+		return err
+	}
+	mu.Lock()
+	for _, e := range held {
+		if e.Time.After(last) {
+			fn(e)
+		}
+	}
+	held, caughtUp = nil, true
+	mu.Unlock()
+	s.live()
+	return <-live
 }
 
 func simPredicate(s Spec, process string) string {

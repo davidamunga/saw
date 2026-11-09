@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davidamunga/saw/internal/device"
 	"github.com/davidamunga/saw/internal/event"
@@ -299,3 +300,156 @@ func TestQuietConnections(t *testing.T) {
 type printFunc func(event.Net)
 
 func (f printFunc) Print(n event.Net) { f(n) }
+
+func TestStreamFilters(t *testing.T) {
+	runtest.Install(t, androidRules(t)...)
+	t.Chdir(t.TempDir())
+	stream := func(args ...string) (string, error) {
+		out, _, err := saw(t, "", append([]string{"stream", "--app", "com.example.app"}, args...)...)
+		return out, err
+	}
+	for _, c := range []struct {
+		args  []string
+		lines int
+	}{
+		{[]string{"--grep", "keystore"}, 4},       // lower case: any case, and tags match too
+		{[]string{"--grep", "KeyStore"}, 4},       // capitals: exact case
+		{[]string{"--grep", "keyStore"}, 0},       // ... so this matches nothing
+		{[]string{"--grep", "slow|refreshed"}, 3}, // a regular expression
+		{[]string{"--exclude-tag", "keystoresecuritylevel,CheckTime"}, 17},
+		{[]string{"--until", "session refreshed"}, 22}, // stops after the match
+	} {
+		out, err := stream(c.args...)
+		if n := strings.Count(out, "\n"); err != nil || n != c.lines {
+			t.Errorf("%v: got %d lines, %v:\n%s", c.args, n, err, out)
+		}
+	}
+	if out, _ := stream("--until", "session refreshed"); !strings.HasSuffix(out, "session refreshed\n") {
+		t.Errorf("--until should stop at the match: %q", out)
+	}
+	if _, err := stream("--until", "nope"); err == nil || isUsage(err) || !strings.Contains(err.Error(), `nothing matched --until "nope"`) {
+		t.Errorf("no match: got %v", err)
+	}
+	for _, args := range [][]string{{"--grep", "("}, {"--until", "[a"}, {"--since", "yesterday"}, {"--since", "-5m"}, {"--for", "-1s"}} {
+		if _, err := stream(args...); !isUsage(err) {
+			t.Errorf("%v: want a usage error, got %v", args, err)
+		}
+	}
+}
+
+func TestStreamForAndSince(t *testing.T) {
+	rules := androidRules(t)[:3]
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: fixture(t, "android-logcat.txt"), Hang: true})
+	runtest.Install(t, rules...)
+	t.Chdir(t.TempDir())
+	start := time.Now()
+	out, errOut, err := saw(t, "", "stream", "--app", "com.example.app", "--for", "300ms", "--since", "5m")
+	if err != nil || strings.Count(out, "\n") != 23 || !strings.Contains(errOut, "(for 300ms)") {
+		t.Errorf("got %d lines, %q, %v", strings.Count(out, "\n"), errOut, err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("--for 300ms took %s", d)
+	}
+	_, _, err = saw(t, "", "stream", "--app", "com.example.app", "--for", "300ms", "--until", "never")
+	if err == nil || !strings.Contains(err.Error(), `nothing matched --until "never" in 300ms`) {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	now := time.Date(2026, 11, 9, 10, 0, 0, 0, time.Local)
+	for in, want := range map[string]time.Time{
+		"":         {},
+		"5m":       now.Add(-5 * time.Minute),
+		"90s":      now.Add(-90 * time.Second),
+		"09:40":    time.Date(2026, 11, 9, 9, 40, 0, 0, time.Local),
+		"09:40:30": time.Date(2026, 11, 9, 9, 40, 30, 0, time.Local),
+		"11:00":    time.Date(2026, 11, 8, 11, 0, 0, 0, time.Local), // not yet today: yesterday
+	} {
+		if got, err := parseSince(in, now); err != nil || !got.Equal(want) {
+			t.Errorf("%q: got %v %v, want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"0s", "-1m", "25:00", "soon"} {
+		if _, err := parseSince(in, now); err == nil {
+			t.Errorf("%q: want an error", in)
+		}
+	}
+}
+
+// twoPhones fakes two Android phones with the app; one logs at :02, the other at :01.
+func twoPhones(t *testing.T, extra ...runtest.Rule) {
+	rules := append(extra,
+		runtest.Rule{Cmd: "adb devices -l", Stdout: "List of devices attached\nS1 device model:Pixel_8\nS2 device model:Pixel_9\n"},
+		runtest.Rule{Cmd: "adb -s S1 shell getprop", Stdout: "14\n"},
+		runtest.Rule{Cmd: "adb -s S2 shell getprop", Stdout: "15\n"},
+		runtest.Rule{Cmd: "adb -s S1 shell pm list packages -U com.example.app", Stdout: "package:com.example.app uid:10710\n"},
+		runtest.Rule{Cmd: "adb -s S2 shell pm list packages -U com.example.app", Stdout: "package:com.example.app uid:10710\n"},
+		runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:02.000 10710 1 1 I One: from the first\n"},
+		runtest.Rule{Cmd: "adb -s S2 logcat", Stdout: "2026-11-09 11:50:01.000 10710 1 1 I Two: from the second\n"},
+	)
+	runtest.Install(t, rules...)
+	t.Chdir(t.TempDir())
+	old := settleTime
+	settleTime = time.Second
+	t.Cleanup(func() { settleTime = old })
+}
+
+func TestStreamSeveralDevices(t *testing.T) {
+	twoPhones(t)
+	// With --since, history is sorted across devices.
+	out, errOut, err := saw(t, "", "stream", "--app", "com.example.app", "--device", "all", "--since", "1h")
+	want := "11:50:01.000 Pixel 9 I Two                from the second\n" +
+		"11:50:02.000 Pixel 8 I One                from the first\n"
+	if err != nil || out != want {
+		t.Errorf("got:\n%s\nwant:\n%s\n%v", out, want, err)
+	}
+	if !strings.Contains(errOut, "on 2 devices (Ctrl-C to stop)") || !strings.Contains(errOut, "saw: com.example.app on Pixel 9 Android 15\n") {
+		t.Errorf("got stderr %q", errOut)
+	}
+	// Named with commas; without --since, lines show as they come.
+	out, _, err = saw(t, "", "stream", "--app", "com.example.app", "--device", "s1, pixel 9", "--json")
+	if err != nil || strings.Count(out, "\n") != 2 || !strings.Contains(out, `"device":"Pixel 9"`) {
+		t.Errorf("got %q %v", out, err)
+	}
+	// The same device twice is one device: no device column.
+	out, _, _ = saw(t, "", "stream", "--app", "com.example.app", "--device", "S1,S1")
+	if out != "11:50:02.000 I One                from the first\n" {
+		t.Errorf("got %q", out)
+	}
+	for _, args := range [][]string{{"--device", "all", "--platform", "ios"}, {"--device", "S1,nope"}} {
+		if _, _, err := saw(t, "", append([]string{"stream", "--app", "com.example.app"}, args...)...); err == nil {
+			t.Errorf("%v: want an error", args)
+		}
+	}
+}
+
+func TestStreamSeveralDevicesOneFails(t *testing.T) {
+	twoPhones(t, runtest.Rule{Cmd: "adb -s S2 shell pm list packages", Stdout: "\n"})
+	out, errOut, err := saw(t, "", "stream", "--app", "com.example.app", "--device", "all", "--since", "1h")
+	if err != nil || !strings.Contains(out, "from the first") || !strings.Contains(errOut, "saw: Pixel 9: com.example.app is not installed") {
+		t.Errorf("got %q %q %v", out, errOut, err)
+	}
+	twoPhones(t, runtest.Rule{Cmd: "adb -s S1 shell pm", Stderr: "offline", Exit: 1},
+		runtest.Rule{Cmd: "adb -s S2 shell pm", Stderr: "offline", Exit: 1})
+	if _, _, err := saw(t, "", "stream", "--app", "com.example.app", "--device", "S1,S2"); err == nil || !strings.Contains(err.Error(), "no device could be read") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestNetFilters(t *testing.T) {
+	n := event.Net{Method: "POST", Status: 402, URL: "https://api.example.com/v1/payments", ResponseBody: `{"error":"card_declined"}`}
+	for _, want := range []string{"POST 402 https://api.example.com/v1/payments", "card_declined"} {
+		if !strings.Contains(netText(n), want) {
+			t.Errorf("missing %q in %q", want, netText(n))
+		}
+	}
+	var got []string
+	q := &quietConnections{next: printFunc(func(n event.Net) { got = append(got, n.Device+":"+n.Kind) })}
+	for _, n := range []event.Net{{Device: "a", Kind: "logged"}, {Device: "a", Kind: "tcp"}, {Device: "b", Kind: "tcp"}} {
+		q.Print(n)
+	}
+	if strings.Join(got, ",") != "a:logged,b:tcp" {
+		t.Errorf("connections should be quieted per device: %v", got)
+	}
+}

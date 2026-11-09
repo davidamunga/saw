@@ -69,3 +69,20 @@ func TestTerminalChecks(t *testing.T) {
 		t.Error("a file is not a terminal")
 	}
 }
+
+func TestDeviceColumn(t *testing.T) {
+	if w := DeviceWidth([]string{"Pixel 8", "iPhone 17 Pro Max Ultra"}); w != 14 {
+		t.Errorf("got %d", w)
+	}
+	var b bytes.Buffer
+	p := NewPretty(&b, false)
+	p.ShowDevice(9)
+	p.Print(event.Event{Time: at, Device: "Pixel 8", Level: event.Info, Tag: "Main", Message: "a\nb"})
+	p.Print(event.Event{Time: at, Device: "iPhone 17 Pro", Level: event.Info, Tag: "Main", Message: "c"})
+	want := "09:41:02.114 Pixel 8   I Main               a\n" +
+		strings.Repeat(" ", 44) + "b\n" +
+		"09:41:02.114 iPhone 1~ I Main               c\n"
+	if b.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
+	}
+}

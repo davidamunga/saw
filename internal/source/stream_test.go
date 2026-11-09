@@ -2,9 +2,11 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davidamunga/saw/internal/config"
 	"github.com/davidamunga/saw/internal/device"
@@ -192,5 +194,66 @@ func TestParsersRejectJunk(t *testing.T) {
 	}
 	if simExecutable("nothing here") != "" || deviceExecutable([]byte("nope"), "x") != "" {
 		t.Error("lookups should come back empty")
+	}
+}
+
+// simLine is one `log stream`/`log show` ndjson line from the app, at 11:50:<sec> +03:00.
+func simLine(sec, msg string) string {
+	return fmt.Sprintf(`{"eventType":"logEvent","messageType":"Default","subsystem":"com.example.app","category":"auth",`+
+		`"processImagePath":"/x/Example.app/Example","timestamp":"2026-11-09 11:50:%s+0300","eventMessage":%q}`+"\n", sec, msg)
+}
+
+func TestStreamSimulatorSince(t *testing.T) {
+	runtest.Install(t,
+		runtest.Rule{Cmd: "xcrun simctl appinfo SIM-1 com.example.app", Stdout: "CFBundleExecutable = Example;\n"},
+		runtest.Rule{Cmd: "xcrun simctl spawn SIM-1 log show", Stdout: "Filtering the log data\n" +
+			simLine("01.000000", "too old") + simLine("02.000000", "history") + simLine("03.000000", "last history")},
+		// The live stream repeats a line history already had.
+		runtest.Rule{Cmd: "xcrun simctl spawn SIM-1 log stream", Stdout: simLine("03.000000", "last history") + simLine("04.000000", "live")},
+	)
+	since := time.Date(2026, 11, 9, 8, 50, 2, 0, time.UTC) // 11:50:02 +03:00
+	var order []string
+	var got []string
+	err := Stream(context.Background(), Spec{
+		Device: sim, App: app, Subsystem: "com.example.app", Since: since,
+		OnStart: func() { order = append(order, "start") },
+		OnLive:  func() { order = append(order, "live") },
+	}, func(e event.Event) { got = append(got, e.Message) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "history,last history,live" {
+		t.Errorf("got %q", got)
+	}
+	if strings.Join(order, ",") != "start,live" {
+		t.Errorf("got %v", order)
+	}
+
+	runtest.Install(t,
+		runtest.Rule{Cmd: "xcrun simctl appinfo SIM-1 com.example.app", Stdout: "CFBundleExecutable = Example;\n"},
+		runtest.Rule{Cmd: "xcrun simctl spawn SIM-1 log show", Stderr: "bad predicate", Exit: 1},
+		runtest.Rule{Cmd: "xcrun simctl spawn SIM-1 log stream", Hang: true},
+	)
+	if _, err := collect(t, Spec{Device: sim, App: app, Since: since}); err == nil || !strings.Contains(err.Error(), "bad predicate") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestSinceElsewhere(t *testing.T) {
+	since := time.Date(2026, 11, 9, 9, 41, 2, 114e6, time.UTC)
+	if got := (Spec{Since: since}).logcatStart(); got != fmt.Sprintf("%d.114", since.Unix()) {
+		t.Errorf("got %q", got)
+	}
+	if got := (Spec{}).logcatStart(); got != "1" {
+		t.Errorf("got %q", got)
+	}
+	// Android reads history in the same stream, so it's live at once.
+	live := false
+	(Spec{Device: pixel, Since: since, OnLive: func() { live = true }}).started()
+	if !live {
+		t.Error("android should be live at start")
+	}
+	if _, err := collect(t, Spec{Device: iphone, App: app, Since: since}); err == nil || !strings.Contains(err.Error(), "only stream live") {
+		t.Errorf("got %v", err)
 	}
 }
