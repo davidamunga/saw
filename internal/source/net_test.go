@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -219,25 +220,48 @@ func collectNet(t *testing.T, s Spec) ([]event.Net, error) {
 
 func TestNetAndroid(t *testing.T) {
 	fakeDNS(t, map[string]string{"35.190.118.8": "8.118.190.35.bc.googleusercontent.com."})
+	oldHost := lookupHost
+	lookupHost = func(ctx context.Context, host string) ([]string, error) {
+		if host == "api.example.com" {
+			return []string{"203.0.0.9"}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	t.Cleanup(func() { lookupHost = oldHost })
 	open := "   1: 0E00A8C0:B7E0 0876BE23:01BB 01 0 0 0 10710 0 0\n"
 	snapshot := func(tcp, udp string) string {
 		return "SAW-TCP\n  sl local_address rem_address st\n" + tcp + "SAW-UDP\n" + udp + "SAW-END\n"
 	}
 	runtest.Install(t,
 		runtest.Rule{Cmd: "adb -s S1 shell pm list packages -U com.example.app", Stdout: "package:com.example.app uid:10710\n"},
+		runtest.Rule{Cmd: "adb -s S1 logcat -v threadtime -v year -v uid -d", Stdout: "2026-11-09 11:50:02.118 10710  9926  9987 D Http: base url https://api.example.com/\n"},
+		runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:03.118 10710  9926  9987 D Http: --> GET https://api.example.com/v1\n2026-11-09 11:50:03.200 10999  1  1 D Other: https://other.example.com/\n", Hang: true},
 		runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: snapshot(open+"   2: 0E00A8C0:B7E1 0876BE24:01BB 01 0 0 0 10999 0 0\n", "") +
-			snapshot(open+open+"   3: 0E00A8C0:B7E2 090000CB:0050 02 0 0 0 10710 0 0\n", "   4: 0E00A8C0:C000 0100800A:0035 01 0 0 0 10710 0 0\n")},
+			snapshot(open+open+"   3: 0E00A8C0:B7E2 090000CB:0050 02 0 0 0 10710 0 0\n", "   4: 0E00A8C0:C000 0100800A:0035 01 0 0 0 10710 0 0\n"), Hang: true},
 	)
-	got, err := collectNet(t, Spec{Device: pixel, App: app})
+	// Both fake streams keep running; stop once the four connections and the log line are in.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var got []event.Net
+	err := StreamNet(ctx, Spec{Device: pixel, App: app}, func(n event.Net) {
+		got = append(got, n)
+		if len(got) == 4 {
+			cancel()
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	sort.SliceStable(got, func(i, j int) bool { return got[i].Kind == "log" && got[j].Kind != "log" })
 	var lines []string
 	for _, n := range got {
+		if n.Kind == "log" && n.Log != "--> GET https://api.example.com/v1" {
+			t.Errorf("only the app's own HTTP log lines: %+v", n)
+		}
 		lines = append(lines, fmt.Sprintf("%s %s:%d %s", n.Kind, n.IP, n.Port, n.Host))
 	}
 	// The connection open across both looks is reported once; other apps' sockets never.
-	want := "tcp 35.190.118.8:443 8.118.190.35.bc.googleusercontent.com|tcp 203.0.0.9:80 |dns 10.128.0.1:53 "
+	want := "log :0 |tcp 35.190.118.8:443 8.118.190.35.bc.googleusercontent.com|tcp 203.0.0.9:80 api.example.com|dns 10.128.0.1:53 "
 	if strings.Join(lines, "|") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(lines, "|"), want)
 	}
@@ -299,16 +323,50 @@ func TestNetIOSDevice(t *testing.T) {
 	}
 }
 
-func TestReverseDNS(t *testing.T) {
-	calls := 0
-	old := lookupAddr
+func TestHostNames(t *testing.T) {
+	ptrCalls := 0
+	oldAddr, oldHost := lookupAddr, lookupHost
 	lookupAddr = func(ctx context.Context, ip string) ([]string, error) {
-		calls++
-		return []string{"host.example."}, nil
+		ptrCalls++
+		return []string{"ptr.example."}, nil
 	}
-	t.Cleanup(func() { lookupAddr = old })
-	r := newReverseDNS()
-	if r.lookup(context.Background(), "1.2.3.4") != "host.example" || r.lookup(context.Background(), "1.2.3.4") != "host.example" || calls != 1 {
-		t.Errorf("want one cached lookup, got %d calls", calls)
+	lookupHost = func(ctx context.Context, host string) ([]string, error) {
+		if host == "api.example.com" {
+			return []string{"203.0.113.7", "2001:db8::7"}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	t.Cleanup(func() { lookupAddr, lookupHost = oldAddr, oldHost })
+	h := newHostNames()
+	h.learnFrom(context.Background(), "GET https://API.example.com/v1 and wss://gone.example.org/x")
+	h.learnFrom(context.Background(), "again https://api.example.com/v2")
+	h.wait(time.Second)
+	if got := h.name(context.Background(), "203.0.113.7"); got != "api.example.com" {
+		t.Errorf("learned name: %q", got)
+	}
+	if got := h.name(context.Background(), "2001:db8::7"); got != "api.example.com" {
+		t.Errorf("learned IPv6 name: %q", got)
+	}
+	if h.name(context.Background(), "198.51.100.1") != "ptr.example" || h.name(context.Background(), "198.51.100.1") != "ptr.example" || ptrCalls != 1 {
+		t.Errorf("want one cached reverse lookup, got %d", ptrCalls)
+	}
+}
+
+func TestHTTPLogLine(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"--> GET https://api.example.com/v1/orders":         true,
+		"<-- 200 https://api.example.com/v1/orders (538ms)": true,
+		"--> END GET":                                    false,
+		"<-- END HTTP (520-byte body)":                   false,
+		"URL to Test   https://api.example.com/api/Ping": true,
+		"Response Code 200":                              true,
+		"status: 404":                                    true,
+		"onCreate":                                       false,
+		"Unsynced badge count=0 userId=22":               false,
+		"Compat change id reported: 171979766; UID 10710; state": false,
+	} {
+		if got := httpLogLine(msg); got != want {
+			t.Errorf("%q: got %v", msg, got)
+		}
 	}
 }

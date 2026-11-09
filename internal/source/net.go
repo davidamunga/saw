@@ -312,52 +312,111 @@ func httpRequest(d []byte) (method, host, path string, ok bool) {
 // ---- Android: the kernel's socket table ----
 
 // netAndroid polls /proc/net for the app's sockets (adb's shell user may read them, with each
-// socket's owning uid) and reports each new connection once.
+// socket's owning uid) and reports each new connection once. It also reads the app's own log:
+// hostnames in its URLs name the connections they resolve to, and its HTTP log lines (URLs,
+// OkHttp's --> and <--) are shown, since Android gives no other view of requests.
 func netAndroid(ctx context.Context, s Spec, emit func(event.Net)) error {
 	if s.App.Android == "" {
 		return fmt.Errorf("app %q has no android package in saw.json", s.App.Name)
 	}
-	uid, err := packageUID(ctx, s.Device.ID, s.App.Android)
+	serial := s.Device.ID
+	uid, err := packageUID(ctx, serial, s.App.Android)
 	if err != nil {
 		return err
 	}
-	const script = "while true; do echo SAW-TCP; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; " +
-		"echo SAW-UDP; cat /proc/net/udp /proc/net/udp6 2>/dev/null; echo SAW-END; sleep 0.25; done"
-	open, now := map[string]bool{}, map[string]bool{}
-	proto := ""
-	names := newReverseDNS()
+	uids := uidNames(uid)
+	logcat := []string{"-s", serial, "logcat", "-v", "threadtime", "-v", "year", "-v", "uid"}
+	names := newHostNames()
+
+	// Learn hostnames from recent history first, so already-open connections get names.
+	if hist, err := run.Output(ctx, "adb", append(logcat, "-d", "-t", "3000")...); err == nil {
+		for _, line := range strings.Split(hist, "\n") {
+			if e, lineUID, ok := ParseLogcat(line); ok && uids[lineUID] {
+				names.learnFrom(ctx, e.Message)
+			}
+		}
+		names.wait(1500 * time.Millisecond)
+	}
+
+	var mu sync.Mutex
+	send := func(n event.Net) {
+		mu.Lock()
+		defer mu.Unlock()
+		n.Platform, n.Device = "android", s.Device.Name
+		emit(n)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	s.started()
-	return run.Lines(ctx, func(line string) {
-		switch strings.TrimSpace(line) {
-		case "SAW-TCP":
-			proto = "tcp"
-			return
-		case "SAW-UDP":
-			proto = "udp"
-			return
-		case "SAW-END":
-			open, now = now, map[string]bool{}
-			return
-		}
-		c, ok := parseProcNet(line, proto)
-		if !ok || c.uid != uid {
-			return
-		}
-		key := proto + " " + c.local + " " + c.remote
-		if now[key] {
-			return
-		}
-		now[key] = true
-		if open[key] { // still open since the last look
-			return
-		}
-		kind := proto
-		if proto == "udp" && c.port == 53 {
-			kind = "dns" // the lookup itself isn't visible, only that one was made
-		}
-		emit(event.Net{Time: time.Now(), Platform: "android", Device: s.Device.Name, Kind: kind,
-			IP: c.ip, Port: c.port, Host: names.lookup(ctx, c.ip)})
-	}, "adb", "-s", s.Device.ID, "shell", script)
+	errc := make(chan error, 2)
+	go func() {
+		errc <- run.Lines(ctx, func(line string) {
+			e, lineUID, ok := ParseLogcat(line)
+			if !ok || !uids[lineUID] {
+				return
+			}
+			names.learnFrom(ctx, e.Message)
+			if httpLogLine(e.Message) {
+				send(event.Net{Time: e.Time, Kind: "log", Log: e.Message, Tag: e.Tag, Level: e.Level.Letter()})
+			}
+		}, "adb", append(logcat, "-T", "1")...)
+	}()
+	go func() {
+		const script = "while true; do echo SAW-TCP; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; " +
+			"echo SAW-UDP; cat /proc/net/udp /proc/net/udp6 2>/dev/null; echo SAW-END; sleep 0.25; done"
+		open, now := map[string]bool{}, map[string]bool{}
+		proto := ""
+		errc <- run.Lines(ctx, func(line string) {
+			switch strings.TrimSpace(line) {
+			case "SAW-TCP":
+				proto = "tcp"
+				return
+			case "SAW-UDP":
+				proto = "udp"
+				return
+			case "SAW-END":
+				open, now = now, map[string]bool{}
+				return
+			}
+			c, ok := parseProcNet(line, proto)
+			if !ok || c.uid != uid {
+				return
+			}
+			key := proto + " " + c.local + " " + c.remote
+			if now[key] {
+				return
+			}
+			now[key] = true
+			if open[key] { // still open since the last look
+				return
+			}
+			kind := proto
+			if proto == "udp" && c.port == 53 {
+				kind = "dns" // the lookup itself isn't visible, only that one was made
+			}
+			send(event.Net{Time: time.Now(), Kind: kind, IP: c.ip, Port: c.port, Host: names.name(ctx, c.ip)})
+		}, "adb", "-s", serial, "shell", script)
+	}()
+	err = <-errc // the first to stop ends both
+	cancel()
+	<-errc
+	return err
+}
+
+var (
+	urlHostRe = regexp.MustCompile(`(?i)\b(?:https?|wss?)://([a-z0-9.-]+\.[a-z]{2,})`)
+	okhttpRe  = regexp.MustCompile(`^(-->|<--) `)
+	// "Response Code 200", "status: 404", "HTTP 503"
+	statusRe = regexp.MustCompile(`(?i)\b(?:response(?:\s*code)?|status(?:\s*code)?|http)\s*[:=]?\s*[1-5]\d\d\b`)
+)
+
+// httpLogLine is an app log line about an HTTP request: one with a URL or a status code in it,
+// or OkHttp's request (-->) and response (<--) lines, but not their END markers.
+func httpLogLine(msg string) bool {
+	if okhttpRe.MatchString(msg) {
+		return !strings.HasPrefix(msg[4:], "END")
+	}
+	return urlHostRe.MatchString(msg) || statusRe.MatchString(msg)
 }
 
 type procConn struct {
@@ -408,24 +467,87 @@ func procIP(h string) net.IP {
 	return ip
 }
 
-// lookupAddr is the reverse DNS lookup; tests replace it.
-var lookupAddr = net.DefaultResolver.LookupAddr
+// lookupAddr and lookupHost are DNS lookups; tests replace them.
+var (
+	lookupAddr = net.DefaultResolver.LookupAddr
+	lookupHost = net.DefaultResolver.LookupHost
+)
 
-// reverseDNS names addresses where it can, quickly, remembering answers.
-type reverseDNS struct{ cache map[string]string }
+// hostNames names connection addresses: first by hostnames the app mentioned in its log that
+// resolve (here, on this computer) to the same address, then by reverse DNS. A name is only
+// ever shown for an exact address match.
+type hostNames struct {
+	mu      sync.Mutex
+	byIP    map[string]string // from the app's own hostnames
+	ptr     map[string]string // from reverse DNS
+	tried   map[string]bool
+	pending sync.WaitGroup
+}
 
-func newReverseDNS() *reverseDNS { return &reverseDNS{cache: map[string]string{}} }
+func newHostNames() *hostNames {
+	return &hostNames{byIP: map[string]string{}, ptr: map[string]string{}, tried: map[string]bool{}}
+}
 
-func (r *reverseDNS) lookup(ctx context.Context, ip string) string {
-	if name, ok := r.cache[ip]; ok {
+// learnFrom resolves, in the background, any new hostnames in an app's log message.
+func (h *hostNames) learnFrom(ctx context.Context, msg string) {
+	for _, m := range urlHostRe.FindAllStringSubmatch(msg, -1) {
+		host := strings.ToLower(m[1])
+		h.mu.Lock()
+		seen := h.tried[host]
+		h.tried[host] = true
+		h.mu.Unlock()
+		if seen {
+			continue
+		}
+		h.pending.Add(1)
+		go func() {
+			defer h.pending.Done()
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			ips, err := lookupHost(ctx, host)
+			if err != nil {
+				return
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			for _, ip := range ips {
+				if p := net.ParseIP(ip); p != nil {
+					h.byIP[p.String()] = host
+				}
+			}
+		}()
+	}
+}
+
+// wait gives in-flight lookups up to d to finish.
+func (h *hostNames) wait(d time.Duration) {
+	done := make(chan struct{})
+	go func() { h.pending.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
+}
+
+func (h *hostNames) name(ctx context.Context, ip string) string {
+	h.wait(300 * time.Millisecond) // a URL logged just before connecting may still be resolving
+	h.mu.Lock()
+	if name := h.byIP[ip]; name != "" {
+		h.mu.Unlock()
+		return name
+	}
+	name, done := h.ptr[ip]
+	h.mu.Unlock()
+	if done {
 		return name
 	}
 	ctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
 	defer cancel()
-	name := ""
 	if names, err := lookupAddr(ctx, ip); err == nil && len(names) > 0 {
 		name = strings.TrimSuffix(names[0], ".")
 	}
-	r.cache[ip] = name
+	h.mu.Lock()
+	h.ptr[ip] = name
+	h.mu.Unlock()
 	return name
 }

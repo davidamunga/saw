@@ -115,13 +115,14 @@ without installing certificates. What it can see depends on the platform:
 |---|---|---|
 | iOS simulator | each request's **URL**, status, time, protocol and size | Apple's networking logs in the app's process |
 | iPhone / iPad | each request's status, time and size, and the **hostname** of each new connection | the same logs (iOS hides URLs on devices), and a packet capture of the app (the TLS server name) |
-| Android | each new **connection**: address, port, and a name where reverse DNS has one | the kernel's socket table, which adb can read |
+| Android | each new **connection**, named by the hostnames the app's own log mentions (or reverse DNS), and the app's **HTTP log lines**: URLs, status codes, OkHttp's `-->`/`<--` | the kernel's socket table, which adb can read, and the app's log |
 
 ```
 09:41:02.380 200  https://api.example.com/v1/orders  538ms h2 3.3 KB     (simulator)
 09:41:02.114 TLS  api.example.com:443  203.0.113.7                         (iPhone)
 09:41:02.918 200  (connection 1)  605ms h2 3.3 KB                         (iPhone)
-09:41:03.002 TCP  ec2-203-0-113-7.compute-1.amazonaws.com:443  203.0.113.7  (Android)
+09:41:03.002 TCP  api.example.com:443  203.0.113.7                         (Android)
+09:41:03.010 LOG  OkHttp --> GET https://api.example.com/v1/orders         (Android)
 ```
 
 HTTPS stays encrypted: you see where an app connects and how requests went, not headers or

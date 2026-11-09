@@ -9,7 +9,7 @@ type Net struct {
 	Time       time.Time `json:"time"`
 	Platform   string    `json:"platform"`
 	Device     string    `json:"device"`
-	Kind       string    `json:"kind"`             // request | http | tls | tcp | udp
+	Kind       string    `json:"kind"`             // request | http | tls | tcp | udp | dns | log
 	URL        string    `json:"url,omitempty"`    // the request's URL, when known
 	Host       string    `json:"host,omitempty"`   // the server's name, when known
 	IP         string    `json:"ip,omitempty"`     // the server's address, when known
@@ -22,4 +22,7 @@ type Net struct {
 	Bytes      int       `json:"bytes,omitempty"`    // response bytes
 	Conn       int       `json:"connection,omitempty"`
 	Cached     bool      `json:"cached,omitempty"` // answered from the app's HTTP cache
+	Log        string    `json:"log,omitempty"`    // kind "log": the app's own HTTP log line
+	Tag        string    `json:"tag,omitempty"`    // kind "log": its logcat tag
+	Level      string    `json:"level,omitempty"`  // kind "log": its level letter
 }

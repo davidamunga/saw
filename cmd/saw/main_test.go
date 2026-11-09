@@ -252,6 +252,8 @@ func TestHelpers(t *testing.T) {
 
 func TestNet(t *testing.T) {
 	rules := androidRules(t)[:3]
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat -v threadtime -v year -v uid -d"})
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "", Hang: true})
 	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: "SAW-TCP\n   1: 0E00A8C0:B7E0 097100CB:01BB 01 0 0 0 10710 0 0\nSAW-UDP\nSAW-END\n"})
 	runtest.Install(t, rules...)
 	t.Chdir(t.TempDir())

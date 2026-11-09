@@ -36,6 +36,11 @@ func (p *NetPretty) paint(color, s string) string {
 
 func (p *NetPretty) Print(n event.Net) {
 	label, color := netLabel(n)
+	if n.Kind == "log" { // the app's own HTTP log line
+		fmt.Fprintf(p.w, "%s %s %s %s\n", p.paint(dim, n.Time.Format("15:04:05.000")),
+			p.paint(color, fmt.Sprintf("%-4s", label)), p.paint(dim, n.Tag), n.Log)
+		return
+	}
 	target := n.URL
 	if target == "" && n.Host != "" {
 		target = hostPort(n.Host, n.Port)
@@ -91,6 +96,8 @@ func netLabel(n event.Net) (string, string) {
 		return "REQ", cyan
 	case n.Kind == "http":
 		return n.Method, cyan
+	case n.Kind == "log":
+		return "LOG", cyan
 	}
 	return strings.ToUpper(n.Kind), dim
 }
