@@ -20,7 +20,11 @@ simulator, or iPhone/iPad, with one command.
 - **Full HTTP requests.** Method, URL, status, headers and bodies, from the logging debug builds
   already do, ready to copy as plain HTTP or curl. No proxy, no certificates, no app changes.
 - **Survives restarts and crashes.** Relaunch the app and the stream carries on.
-- **Made for terminals.** Aligned, copiable output for people; `--json` for scripts, CI and agents.
+- **Looks back.** `--since 5m` shows what already happened: the crash on launch, the request that
+  just failed.
+- **Every device at once.** `--device all` follows the app on Android and iOS together.
+- **Made for terminals and scripts.** Aligned, copiable output for people; `--json`, `--grep`,
+  `--until` and `--for` for scripts, CI and agents.
 
 ## Install
 
@@ -46,14 +50,17 @@ anything missing.
 ## Quick start
 
 ```sh
-saw devices                                 # what's connected
-saw stream --app com.example.app            # the app's logs
-saw net --app com.example.app               # the app's network requests
-saw net --app com.example.app --full        # ... with headers and bodies, as plain HTTP
+saw devices                                                  # what's connected
+saw stream --app com.example.app                             # the app's logs
+saw net --app com.example.app                                # the app's network requests
+saw net --app com.example.app --full                         # ... with headers and bodies, as plain HTTP
+saw stream --app com.example.app --since 5m --grep checkout  # the last 5 minutes, about checkout
+saw net --app com.example.app --device all                   # requests from every device at once
 ```
 
 `--app` takes an Android package name or iOS bundle id, or a short name from [`saw.json`](#sawjson).
-With no `--device`, saw uses the only running device; with several, it asks which one.
+With no `--device`, saw uses the only running device; with several, it asks which one (or pass
+`--device all`).
 
 ## Logs: `saw stream`
 
@@ -164,6 +171,49 @@ HTTPS stays encrypted on the network, so this view shows where the app connects 
 went, not their contents. Once the app has logged a request, these lines stop, since the logged
 requests say more; `--connections` keeps them.
 
+## Look back, filter, stop, and several devices
+
+These work with both `saw stream` and `saw net`.
+
+**`--since`** starts back in time: `--since 5m`, `--since 90s`, or a clock time, `--since 09:40`.
+saw prints what the device still has from then, then carries on live.
+
+- **Android:** all of it, as far back as the device's log buffer goes (usually the last few
+  minutes to hours).
+- **iOS simulator:** info level and above. iOS keeps debug-level lines only while something is
+  streaming them, so start `saw stream` before the bug if you need those.
+- **iPhone/iPad:** not available, since they only stream live.
+
+**`--grep`** shows only what matches a regular expression: in `saw stream`, a line's message or
+tag; in `saw net`, a request's method, status, URL, host or bodies. A pattern in lower case ignores
+case (`--grep checkout`), and one with capitals matches case exactly (`--grep Checkout`).
+`--exclude-tag` (`saw stream`) hides chatty tags or categories: `--exclude-tag choreographer,ViewRootImpl`.
+
+**`--until`** stops after the first match, and exits with an error if nothing matches.
+**`--for`** stops after a while. Together they make saw usable from scripts, CI and coding agents:
+
+```sh
+# Did the payment go through within 30 seconds of launch?
+saw stream --until "payment (succeeded|failed)" --for 30s
+
+# Record 10 seconds of requests as JSON.
+saw net --for 10s --json > requests.ndjson
+```
+
+`--for` counts from when live lines start on every device, after any `--since` history.
+
+**`--device all`** follows the app on every running device it's configured for, with a column
+naming each line's device. `--device pixel,"17 pro"` picks several by name. With `--since`, the
+history from every device is printed in time order.
+
+```
+09:41:05.020 Pixel 8   I checkout           payment succeeded: order #1042
+09:41:05.410 iPhone 17 E checkout           payment failed: card declined
+```
+
+If one device can't be read (the app isn't installed, or it's an iPhone with `--since`), saw says
+so and carries on with the others.
+
 ## saw.json
 
 Optional. It gives a project's apps short names and lists its log scopes, so a team can run
@@ -200,13 +250,16 @@ listed, `--app` can be left out. A misspelled key or scope is an error, not sile
 | Command | Flags |
 |---|---|
 | `saw devices` | `--all` includes shut-down simulators; `--json` |
-| `saw stream` | `--app`, `--device`, `--platform android\|ios`, `--scope a,b` (repeatable), `--level verbose\|debug\|info\|warn\|error\|fatal`, `--all`, `--json` |
-| `saw net` | `--app`, `--device`, `--platform`, and one of `--full`, `--curl` or `--json`; `--connections` |
+| `saw stream` | `--app`, `--scope a,b` (repeatable), `--level verbose\|debug\|info\|warn\|error\|fatal`, `--exclude-tag a,b`, `--all`, `--json`, and the shared flags |
+| `saw net` | `--app`, one of `--full`, `--curl` or `--json`; `--connections`, and the shared flags |
 | `saw doctor` | |
 | `saw version` | |
 
+Shared flags for `stream` and `net`: `--device`, `--platform android|ios`, `--since`, `--grep`,
+`--until`, `--for` (see [above](#look-back-filter-stop-and-several-devices)).
+
 Every command takes `--config <path>`. `--device` takes a device's id, the start of its id, or all
-or part of its name (`pixel`, `"17 pro"`).
+or part of its name (`pixel`, `"17 pro"`); several separated by commas; or `all`.
 
 ### JSON
 
