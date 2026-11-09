@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/davidamunga/saw/actions/workflows/ci.yml/badge.svg)](https://github.com/davidamunga/saw/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/davidamunga/saw)](https://github.com/davidamunga/saw/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/davidamunga/saw.svg)](https://pkg.go.dev/github.com/davidamunga/saw)
 
 Stream a mobile app's logs from any Android device or emulator, iOS simulator, or iPhone/iPad, with
 one command.
