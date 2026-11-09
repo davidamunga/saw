@@ -1,8 +1,15 @@
-# saw
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/saw-logo-dark.svg">
+    <img alt="saw" src="assets/saw-logo-light.svg" width="240">
+  </picture>
+</h1>
 
-[![CI](https://github.com/davidamunga/saw/actions/workflows/ci.yml/badge.svg)](https://github.com/davidamunga/saw/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/davidamunga/saw)](https://github.com/davidamunga/saw/releases/latest)
-[![Go Reference](https://pkg.go.dev/badge/github.com/davidamunga/saw.svg)](https://pkg.go.dev/github.com/davidamunga/saw)
+<p align="center">
+  <a href="https://github.com/davidamunga/saw/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/davidamunga/saw/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/davidamunga/saw/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/davidamunga/saw"></a>
+  <a href="https://pkg.go.dev/github.com/davidamunga/saw"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/davidamunga/saw.svg"></a>
+</p>
 
 Stream a mobile app's logs from any Android device or emulator, iOS simulator, or iPhone/iPad, with
 one command.
