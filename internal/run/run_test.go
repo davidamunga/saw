@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/davidamunga/saw/internal/run"
 	"github.com/davidamunga/saw/internal/runtest"
@@ -67,5 +68,21 @@ func TestLines(t *testing.T) {
 func TestLinesMissingTool(t *testing.T) {
 	if err := run.Lines(context.Background(), func(string) {}, "saw-no-such-tool-xyz"); err == nil {
 		t.Error("want an error for a missing tool")
+	}
+}
+
+// A tool that ignores interrupts is killed once it has had time to stop.
+func TestLinesStubbornTool(t *testing.T) {
+	old := *run.StopWait
+	*run.StopWait = 100 * time.Millisecond
+	t.Cleanup(func() { *run.StopWait = old })
+	runtest.Install(t, runtest.Rule{Cmd: "tool deaf", Stdout: "first\n", Hang: true, Deaf: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	start := time.Now()
+	if err := run.Lines(ctx, func(string) { cancel() }, "tool", "deaf"); err != nil {
+		t.Errorf("cancelled stream: %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("took %s to stop", d)
 	}
 }

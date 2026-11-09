@@ -6,8 +6,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"time"
 )
 
 // Command and LookPath start and find tools. Tests replace them with fakes (see runtest).
@@ -40,6 +43,13 @@ func Lines(ctx context.Context, fn func(string), name string, args ...string) er
 	cmd := Command(ctx, name, args...)
 	// pymobiledevice3 is Python, which holds output back when it isn't writing to a terminal.
 	cmd.Env = append(cmd.Environ(), "PYTHONUNBUFFERED=1")
+	// When ctx ends, interrupt the tool as Ctrl-C would, so it can stop what it started: killing
+	// `simctl spawn` would leave the simulator's `log` running. Kill it if that doesn't work.
+	if runtime.GOOS != "windows" {
+		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	}
+	wait := stopWait
+	cmd.WaitDelay = wait
 	var stderr tail
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -49,6 +59,10 @@ func Lines(ctx context.Context, fn func(string), name string, args ...string) er
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// Something the tool started may still hold its output open; stop reading after a while.
+	defer context.AfterFunc(ctx, func() {
+		time.AfterFunc(wait, func() { _ = stdout.Close() })
+	})()
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -63,6 +77,9 @@ func Lines(ctx context.Context, fn func(string), name string, args ...string) er
 	}
 	return nil
 }
+
+// stopWait is how long a tool gets to stop after being interrupted.
+var stopWait = 2 * time.Second
 
 func fail(name string, args []string, err error, stderr string) error {
 	msg := strings.TrimSpace(stderr)

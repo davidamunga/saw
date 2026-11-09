@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,7 @@ type Rule struct {
 	Stderr string
 	Exit   int
 	Hang   bool // after printing, wait to be killed (for streams cancelled by ctx)
+	Deaf   bool // with Hang: ignore interrupts, so only a kill stops it
 }
 
 // Main runs the tests, or, when the binary was started as a fake tool, acts as that tool.
@@ -58,6 +60,9 @@ func fake(rulesJSON string, args []string) int {
 		if line == r.Cmd || strings.HasPrefix(line, r.Cmd+" ") {
 			fmt.Fprint(os.Stdout, r.Stdout)
 			fmt.Fprint(os.Stderr, r.Stderr)
+			if r.Deaf {
+				signal.Ignore(os.Interrupt)
+			}
 			if r.Hang {
 				time.Sleep(time.Minute)
 			}
