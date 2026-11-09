@@ -1,8 +1,5 @@
 <h1 align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/saw-logo-dark.svg">
-    <img alt="saw" src="assets/saw-logo-light.svg" width="240">
-  </picture>
+  <img alt="saw" src="assets/saw-logo-card.png" width="300">
 </h1>
 
 <p align="center">
