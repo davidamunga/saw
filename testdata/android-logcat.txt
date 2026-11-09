@@ -1,0 +1,24 @@
+2026-11-09 11:49:25.939 10710  9926  9926 I com.example.app: Late-enabling -Xcheck:jni
+2026-11-09 11:49:25.971 10710  9926  9926 I com.example.app: Using generational CollectorTypeCMC GC.
+2026-11-09 11:49:26.006 10710  9926  9926 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10710; state: ENABLED
+2026-11-09 11:49:26.936 10710  9926  9926 D nativeloader: Configuring clns-4 for other apk /data/app/~~7wzIKyvXI_9wo2bllOG2wg==/com.example.app-hI5wMCrfNwwrmMPU4b2c4Q==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~7wzIKyvXI_9wo2bllOG2wg==/com.example.app-hI5wMCrfNwwrmMPU4b2c4Q==/lib/arm64:/data/app/~~7wzIKyvXI_9wo2bllOG2wg==/com.example.app-hI5wMCrfNwwrmMPU4b2c4Q==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.example.app
+2026-11-09 11:49:26.937 10710  9926  9926 W CheckTime: App running slow: Executing application classloader create took 918ms
+2026-11-09 11:49:26.946 10710  9926  9926 V GraphicsEnvironment: ANGLE Developer option for 'com.example.app' set to: 'default'
+2026-11-09 11:49:26.946 10710  9926  9926 V GraphicsEnvironment: Neither updatable production driver nor prerelease driver is supported.
+2026-11-09 11:49:26.949 10710  9926  9926 D NetworkSecurityConfig: Using Network Security Config from resource network_security_config debugBuild: true
+2026-11-09 11:49:26.951 10710  9926  9926 D NetworkSecurityConfig: Using Network Security Config from resource network_security_config debugBuild: true
+2026-11-09 11:49:26.955 10710  9926  9926 W DdRumContentProvider: processImportance:100
+2026-11-09 11:49:26.964 10710  9926  9926 W FirebaseApp: Default FirebaseApp failed to initialize because no default options were found. This usually means that com.google.gms:google-services was not applied to your gradle project.
+2026-11-09 11:49:26.964 10710  9926  9926 I FirebaseInitProvider: FirebaseApp initialization unsuccessful
+2026-11-09 11:49:27.009 10710  9926  9926 D WM-WrkMgrInitializer: Initializing WorkManager with default configuration.
+2026-11-09 11:49:27.157 10710  9926  9941 D CompatibilityChangeReporter: Compat change id reported: 160794467; UID 10710; state: ENABLED
+2026-11-09 11:49:27.315 10710  9926  9945 W KeyStoreSecurityLevel: before mSecurityLevel.createOperation
+2026-11-09 11:49:27.319 10710  9926  9945 W KeyStoreSecurityLevel: after mSecurityLevel.createOperation
+2026-11-09 11:49:27.325 10710  9926  9926 W CheckTime: App running slow: Executing handleBindApplication : callApplicationOnCreate took 207ms
+2026-11-09 11:49:27.460 10710  9926  9955 W KeyStoreSecurityLevel: before mSecurityLevel.createOperation
+2026-11-09 11:49:27.464 10710  9926  9955 W KeyStoreSecurityLevel: after mSecurityLevel.createOperation
+2026-11-09 11:49:27.502 10710  9926  9926 I Choreographer: Skipped 34 frames!  The application may be doing too much work on its main thread.
+2026-11-09 11:50:02.118 10710  9926  9987 D ExampleHttp: GET /v1/appointments 200 (143 ms)
+2026-11-09 11:50:02.120 u0_a710  9926  9987 I ExampleAuth: session refreshed
+2026-11-09 11:50:03.001 10710  9926  9926 E AndroidRuntime: FATAL EXCEPTION: main
+2026-11-09 11:48:19.879 shell  9826  9826 D AndroidRuntime: >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
