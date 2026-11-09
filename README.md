@@ -1,5 +1,8 @@
 # saw
 
+[![CI](https://github.com/davidamunga/saw/actions/workflows/ci.yml/badge.svg)](https://github.com/davidamunga/saw/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/davidamunga/saw)](https://github.com/davidamunga/saw/releases/latest)
+
 Stream a mobile app's logs from any Android device or emulator, iOS simulator, or iPhone/iPad, with
 one command.
 
