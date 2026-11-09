@@ -78,7 +78,7 @@ Usage:
   saw devices [--all] [--json]
   saw stream  [--app <name|id>] [--scope a,b] [--device <id|name>] [--platform android|ios]
               [--level <level>] [--all] [--json]
-  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--json]
+  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--full] [--json]
   saw doctor
   saw version
 
@@ -279,6 +279,7 @@ func netCmd(ctx context.Context, args []string) error {
 	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
 	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
 	platform := fs.String("platform", "", "android or ios")
+	full := fs.Bool("full", false, "show the headers and bodies of requests the app logs itself")
 	asJSON := fs.Bool("json", false, "print one JSON event per line")
 	if err := parse(fs, args); err != nil {
 		return err
@@ -291,7 +292,7 @@ func netCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var printer output.NetPrinter = output.NewNetPretty(stdout, wantColor(stdout))
+	var printer output.NetPrinter = output.NewNetPretty(stdout, wantColor(stdout), *full)
 	if *asJSON {
 		printer = output.NewNetJSON(stdout)
 	}

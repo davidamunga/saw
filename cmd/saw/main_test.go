@@ -261,6 +261,9 @@ func TestNet(t *testing.T) {
 	if err != nil || !strings.Contains(out, "TCP  203.0.113.9:443") || !strings.Contains(errOut, "network on Pixel 8") {
 		t.Errorf("got %q %q %v", out, errOut, err)
 	}
+	if out, _, err := saw(t, "", "net", "--app", "com.example.app", "--full"); err != nil || !strings.Contains(out, "TCP  203.0.113.9:443") {
+		t.Errorf("--full: %q %v", out, err)
+	}
 	out, _, _ = saw(t, "", "net", "--app", "com.example.app", "--json")
 	if !strings.Contains(out, `"kind":"tcp"`) || !strings.Contains(out, `"ip":"203.0.113.9"`) {
 		t.Errorf("got %q", out)

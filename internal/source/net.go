@@ -44,17 +44,51 @@ func netSimulator(ctx context.Context, s Spec, emit func(event.Net)) error {
 	if err != nil {
 		return err
 	}
-	predicate := fmt.Sprintf(`process == %q AND (subsystem == "com.apple.CFNetwork" OR subsystem == "com.apple.network")`, process)
-	cf := newCFNetwork()
+	predicate := fmt.Sprintf(`process == %q AND (subsystem == "com.apple.CFNetwork" OR subsystem == "com.apple.network"`+
+		` OR NOT (subsystem BEGINSWITH "com.apple."))`, process)
+	var mu sync.Mutex
+	send := func(n event.Net) {
+		mu.Lock()
+		defer mu.Unlock()
+		n.Platform, n.Device = "ios", s.Device.Name
+		emit(n)
+	}
+	cf, logged := newCFNetwork(), newHTTPLog(send)
+	defer logged.start()()
 	s.started()
 	return run.Lines(ctx, func(line string) {
 		if e, ok := ParseUnifiedLog([]byte(line)); ok {
-			if n, ok := cf.event(e); ok {
-				n.Platform, n.Device = "ios", s.Device.Name
-				emit(n)
-			}
+			s.netIOSLine(e, cf, logged, send)
 		}
 	}, "xcrun", "simctl", "spawn", s.Device.ID, "log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
+}
+
+// netIOSLine routes one iOS log line: Apple's networking logs become requests; the app's own
+// lines feed its logged requests.
+func (s Spec) netIOSLine(e event.Event, cf *cfNetwork, logged *httpLog, send func(event.Net)) {
+	if n, ok := cf.event(e); ok {
+		send(n)
+		return
+	}
+	if !strings.HasPrefix(e.Subsystem, "com.apple.") && s.keepIOS(e) {
+		appHTTPLog(e, logged, send)
+	}
+}
+
+// appHTTPLog passes one of the app's own log lines to logged, and shows it on its own when it
+// looks like HTTP but isn't part of a request block logged's formats know.
+func appHTTPLog(e event.Event, logged *httpLog, send func(event.Net)) {
+	tag := e.Tag
+	if tag == "" {
+		tag = e.Category
+	}
+	for _, l := range strings.Split(e.Message, "\n") {
+		one := e
+		one.Message = l
+		if !logged.line(one) && httpLogLine(l) {
+			send(event.Net{Time: e.Time, Kind: "log", Log: l, Tag: tag, Level: e.Level.Letter()})
+		}
+	}
 }
 
 func netIOSDevice(ctx context.Context, s Spec, emit func(event.Net)) error {
@@ -75,15 +109,14 @@ func netIOSDevice(ctx context.Context, s Spec, emit func(event.Net)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	udid := s.Device.ID
-	cf, pc := newCFNetwork(), &pcapParser{}
+	cf, pc, logged := newCFNetwork(), &pcapParser{}, newHTTPLog(send)
+	defer logged.start()()
 	s.started()
 	errc := make(chan error, 2)
 	go func() {
 		errc <- run.Lines(ctx, func(line string) {
 			if e, ok := ParseDeviceLog([]byte(line)); ok {
-				if n, ok := cf.event(e); ok {
-					send(n)
-				}
+				s.netIOSLine(e, cf, logged, send)
 			}
 		}, "pymobiledevice3", "syslog", "live", "--udid", udid, "--format", "json", "--process-name", process)
 	}()
@@ -347,6 +380,8 @@ func netAndroid(ctx context.Context, s Spec, emit func(event.Net)) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	logged := newHTTPLog(send)
+	defer logged.start()()
 	s.started()
 	errc := make(chan error, 2)
 	go func() {
@@ -356,9 +391,7 @@ func netAndroid(ctx context.Context, s Spec, emit func(event.Net)) error {
 				return
 			}
 			names.learnFrom(ctx, e.Message)
-			if httpLogLine(e.Message) {
-				send(event.Net{Time: e.Time, Kind: "log", Log: e.Message, Tag: e.Tag, Level: e.Level.Letter()})
-			}
+			appHTTPLog(e, logged, send)
 		}, "adb", append(logcat, "-T", "1")...)
 	}()
 	go func() {

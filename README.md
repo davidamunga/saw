@@ -52,6 +52,7 @@ saw stream --app com.example.app --scope OkHttp,SyncWorker   # only these tags (
 saw stream --app com.example.app --device pixel --level warn
 saw stream --app com.example.app --json > session.jsonl
 saw net --app com.example.app                # the app's network requests and connections
+saw net --app com.example.app --full         # with the headers and bodies the app logs
 saw doctor                                   # what's missing, and how to fix it
 ```
 
@@ -72,7 +73,8 @@ With no `--device`, saw uses the only running device; with several, it asks whic
 
 `saw devices` takes `--all` (to include shut-down simulators) and `--json`.
 
-`saw net` takes `--app`, `--device`, `--platform`, `--json` and `--config`, the same as `saw stream`.
+`saw net` takes `--app`, `--device`, `--platform`, `--json` and `--config`, the same as `saw stream`,
+and `--full` for the headers and bodies of requests the app logs itself.
 
 ### What "the app's own logs" means
 
@@ -125,10 +127,37 @@ without installing certificates. What it can see depends on the platform:
 09:41:03.010 LOG  OkHttp --> GET https://api.example.com/v1/orders         (Android)
 ```
 
-HTTPS stays encrypted: you see where an app connects and how requests went, not headers or
-bodies. Several requests often share one connection, so on iPhone and Android a connection line
-can stand for many requests. For full request contents, use an intercepting proxy such as
-mitmproxy or Proxyman alongside saw.
+HTTPS stays encrypted on the network: there, you see where an app connects and how requests went.
+Several requests often share one connection, so on iPhone and Android a connection line can stand
+for many requests.
+
+### Full requests, from the app's own HTTP logging
+
+Debug builds often log every request: OkHttp's `HttpLoggingInterceptor` on Android, and loggers
+like it on iOS. `saw net` assembles those logs into one line per request, on every platform and
+under any tag or category, and `--full` adds the headers and bodies:
+
+```
+09:41:02.380 POST https://api.example.com/v1/orders  201  412ms
+    → Content-Type: application/json
+    → {"item":"1042"}
+    ← content-type: application/json
+    ← {"id":"ord_88","status":"created"}
+```
+
+It knows three formats:
+
+| Format | Used by | Looks like |
+|---|---|---|
+| OkHttp-style | OkHttp and Retrofit, and the many loggers that copy it | `--> POST https://…`, headers, body, `<-- 201 https://… (412ms)` |
+| Ktor | Ktor's `Logging` plugin | `REQUEST: https://…`, `METHOD: …`, `RESPONSE: 200 OK` |
+| Dio | Flutter's Dio `LogInterceptor` | `*** Request ***`, `uri: …`, `statusCode: …` |
+
+Other HTTP-looking lines the app logs (a URL, or a status code) appear as `LOG` lines. What you see
+is what the app logs: its log level decides whether headers and bodies are included (OkHttp's
+`Level.BODY`), and its own redaction (`Authorization: ██`) stays. iOS caps each log message at
+about 1 KB, so long bodies there are cut short. An app that doesn't log its requests shows only the
+network view above.
 
 ## saw.json
 

@@ -235,33 +235,40 @@ func TestNetAndroid(t *testing.T) {
 	runtest.Install(t,
 		runtest.Rule{Cmd: "adb -s S1 shell pm list packages -U com.example.app", Stdout: "package:com.example.app uid:10710\n"},
 		runtest.Rule{Cmd: "adb -s S1 logcat -v threadtime -v year -v uid -d", Stdout: "2026-11-09 11:50:02.118 10710  9926  9987 D Http: base url https://api.example.com/\n"},
-		runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:03.118 10710  9926  9987 D Http: --> GET https://api.example.com/v1\n2026-11-09 11:50:03.200 10999  1  1 D Other: https://other.example.com/\n", Hang: true},
+		runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:03.118 10710  9926  9987 D Http: --> GET https://api.example.com/v1\n2026-11-09 11:50:03.200 10999  1  1 D Other: https://other.example.com/\n2026-11-09 11:50:03.300 10710  9926  9987 D Http: <-- 200 https://api.example.com/v1 (182ms)\n2026-11-09 11:50:03.301 10710  9926  9987 D Http: <-- END HTTP\n", Hang: true},
 		runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: snapshot(open+"   2: 0E00A8C0:B7E1 0876BE24:01BB 01 0 0 0 10999 0 0\n", "") +
 			snapshot(open+open+"   3: 0E00A8C0:B7E2 090000CB:0050 02 0 0 0 10710 0 0\n", "   4: 0E00A8C0:C000 0100800A:0035 01 0 0 0 10710 0 0\n"), Hang: true},
 	)
-	// Both fake streams keep running; stop once the four connections and the log line are in.
+	// Both fake streams keep running; stop once the three connections and the request the app
+	// logged are in.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var got []event.Net
+	conns, logged := 0, false
 	err := StreamNet(ctx, Spec{Device: pixel, App: app}, func(n event.Net) {
 		got = append(got, n)
-		if len(got) == 4 {
+		if n.Kind == "logged" {
+			logged = true
+		} else {
+			conns++
+		}
+		if conns == 3 && logged {
 			cancel()
 		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sort.SliceStable(got, func(i, j int) bool { return got[i].Kind == "log" && got[j].Kind != "log" })
+	sort.SliceStable(got, func(i, j int) bool { return got[i].Kind == "logged" && got[j].Kind != "logged" })
 	var lines []string
 	for _, n := range got {
-		if n.Kind == "log" && n.Log != "--> GET https://api.example.com/v1" {
-			t.Errorf("only the app's own HTTP log lines: %+v", n)
+		if n.Kind == "logged" && (n.Method != "GET" || n.URL != "https://api.example.com/v1" || n.Status != 200 || n.DurationMs != 182) {
+			t.Errorf("only the app's own logged requests: %+v", n)
 		}
 		lines = append(lines, fmt.Sprintf("%s %s:%d %s", n.Kind, n.IP, n.Port, n.Host))
 	}
 	// The connection open across both looks is reported once; other apps' sockets never.
-	want := "log :0 |tcp 35.190.118.8:443 8.118.190.35.bc.googleusercontent.com|tcp 203.0.0.9:80 api.example.com|dns 10.128.0.1:53 "
+	want := "logged :0 |tcp 35.190.118.8:443 8.118.190.35.bc.googleusercontent.com|tcp 203.0.0.9:80 api.example.com|dns 10.128.0.1:53 "
 	if strings.Join(lines, "|") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(lines, "|"), want)
 	}
@@ -272,6 +279,9 @@ func TestNetAndroid(t *testing.T) {
 
 func TestNetSimulator(t *testing.T) {
 	logs := `{"eventType":"logEvent","messageType":"Default","subsystem":"com.apple.network","category":"connection","processImagePath":"/x/Example.app/Example","timestamp":"2026-11-09 15:44:23.199000+0300","eventMessage":"[C1 EB11 Hostname#30b4cfe5:443 quic-connection, url: https://example.com/, definite] start"}
+{"eventType":"logEvent","messageType":"Debug","subsystem":"com.example.app","category":"http","processImagePath":"/x/Example.app/Example","senderImagePath":"/x/Example.app/Example","threadID":5,"timestamp":"2026-11-09 15:44:23.300000+0300","eventMessage":"--> GET https://api.example.com/v1/me"}
+{"eventType":"logEvent","messageType":"Debug","subsystem":"com.example.app","category":"http","processImagePath":"/x/Example.app/Example","senderImagePath":"/x/Example.app/Example","threadID":5,"timestamp":"2026-11-09 15:44:23.900000+0300","eventMessage":"<-- 200 https://api.example.com/v1/me (600ms)\n<-- END HTTP"}
+{"eventType":"logEvent","messageType":"Debug","subsystem":"com.example.app","category":"net","processImagePath":"/x/Example.app/Example","senderImagePath":"/x/Example.app/Example","threadID":6,"timestamp":"2026-11-09 15:44:24.000000+0300","eventMessage":"fetched https://cdn.example.com/logo.png"}
 {"eventType":"logEvent","messageType":"Default","subsystem":"com.apple.CFNetwork","category":"Summary","processImagePath":"/x/Example.app/Example","timestamp":"2026-11-09 15:44:24.150000+0300","eventMessage":"Task <5B59>.<1> summary for task success {transaction_duration_ms=941, response_status=200, connection=1, protocol=\"h2\", response_bytes=520}"}
 `
 	runtest.Install(t,
@@ -279,7 +289,16 @@ func TestNetSimulator(t *testing.T) {
 		runtest.Rule{Cmd: "xcrun simctl spawn SIM-1 log stream", Stdout: "Filtering the log data\n" + logs},
 	)
 	got, err := collectNet(t, Spec{Device: sim, App: app})
-	if err != nil || len(got) != 1 || got[0].URL != "https://example.com/" || got[0].Device != "iPhone 17 Pro" || got[0].Platform != "ios" {
+	kinds := map[string]string{}
+	for _, n := range got {
+		kinds[n.Kind] = n.URL + n.Log
+		if n.Device != "iPhone 17 Pro" || n.Platform != "ios" {
+			t.Errorf("got %+v", n)
+		}
+	}
+	// Apple's request, the app's logged request (its two lines in one message), and a loose HTTP line.
+	if err != nil || kinds["request"] != "https://example.com/" || kinds["logged"] != "https://api.example.com/v1/me" ||
+		kinds["log"] != "fetched https://cdn.example.com/logo.png" {
 		t.Errorf("got %+v %v", got, err)
 	}
 	runtest.Install(t, runtest.Rule{Cmd: "xcrun simctl appinfo", Exit: 1})
