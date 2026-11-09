@@ -4,6 +4,8 @@ package source
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/davidamunga/saw/internal/config"
 	"github.com/davidamunga/saw/internal/device"
@@ -26,6 +28,43 @@ func Stream(ctx context.Context, s Spec, emit func(event.Event)) error {
 	switch {
 	case s.Device.Platform == "android":
 		return streamAndroid(ctx, s, emit)
+	case s.Device.Kind == "simulator":
+		return streamSimulator(ctx, s, emit)
+	case s.Device.Platform == "ios":
+		return streamIOSDevice(ctx, s, emit)
 	}
 	return fmt.Errorf("unsupported device %s", s.Device)
+}
+
+func (s Spec) checkIOS() error {
+	if s.App.IOS == "" {
+		return fmt.Errorf("app %q has no ios bundle id in saw.json", s.App.Name)
+	}
+	return nil
+}
+
+// setArea names an iOS line's area: its category, when it's in the app's own subsystem.
+func (s Spec) setArea(e *event.Event) {
+	if s.Subsystem != "" && e.Subsystem == s.Subsystem {
+		e.Area = e.Category
+	}
+}
+
+// keepIOS decides whether an iOS line from the app's process is the app's own.
+// With a subsystem: that subsystem (and the chosen categories). Without one, for apps that log with
+// NSLog, os_log or a third-party logger: lines sent from code inside the app bundle (its binary and
+// the frameworks it ships), minus Apple subsystems. That drops Apple's frameworks, which log a lot
+// from inside every app, often with no subsystem.
+func (s Spec) keepIOS(e event.Event) bool {
+	if s.All {
+		return true
+	}
+	if s.Chosen && !slices.Contains(s.Areas, e.Category) {
+		return false
+	}
+	if s.Subsystem != "" {
+		return e.Subsystem == s.Subsystem
+	}
+	// Apple subsystems are dropped even from inside the bundle (Xcode's debug stub logs there).
+	return strings.Contains(e.Sender, ".app/") && !strings.HasPrefix(e.Subsystem, "com.apple.")
 }
