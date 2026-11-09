@@ -12,7 +12,7 @@ Stream a mobile app's logs from any Android device or emulator, iOS simulator, o
 one command.
 
 <p align="center">
-  <img alt="saw streaming a demo app's logs from an Android phone" src="assets/saw-demo.gif" width="800">
+  <img alt="saw net showing a demo app's requests live on an Android phone, then the same requests as curl commands" src="assets/saw-demo.gif" width="800">
 </p>
 
 - **One command for every device.** Android and iOS, emulators, simulators and physical devices.
