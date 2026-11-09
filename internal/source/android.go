@@ -27,14 +27,14 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 
 	// -T 1: start at the newest line instead of replaying the whole buffer.
 	args := []string{"-s", serial, "logcat", "-v", "threadtime", "-v", "year", "-v", "uid", "-T", "1"}
-	tagArea := map[string]string{}
+	tagScope := map[string]string{}
 	if s.TagFor != nil {
-		for _, a := range s.Areas {
-			tagArea[s.TagFor(a)] = a
+		for _, a := range s.Scopes {
+			tagScope[s.TagFor(a)] = a
 		}
 	}
-	if !s.All && len(tagArea) > 0 {
-		for tag := range tagArea {
+	if !s.All && len(tagScope) > 0 {
+		for tag := range tagScope {
 			args = append(args, tag+":V")
 		}
 		args = append(args, "AndroidRuntime:E", "*:S") // keep crashes
@@ -51,19 +51,19 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 		}
 		e.Device = s.Device.Name
 		e.Process = s.App.Android
-		e.Area = tagArea[e.Tag]
+		e.Scope = tagScope[e.Tag]
 		emit(e)
 	}, "adb", args...)
 }
 
-// keepAndroidTag applies --area when the project has no tag convention (no android.tag):
-// the areas are then logcat tags themselves, matched in any case. Crashes always show.
+// keepAndroidTag applies --scope when the project has no tag convention (no android.tag):
+// the scopes are then logcat tags themselves, matched in any case. Crashes always show.
 // With a convention, logcat already filtered by tag.
 func (s Spec) keepAndroidTag(tag string) bool {
 	if !s.Chosen || s.TagFor != nil {
 		return true
 	}
-	return tag == "AndroidRuntime" || containsFold(s.Areas, tag)
+	return tag == "AndroidRuntime" || containsFold(s.Scopes, tag)
 }
 
 func packageUID(ctx context.Context, serial, pkg string) (int, error) {

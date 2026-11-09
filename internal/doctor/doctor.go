@@ -54,9 +54,9 @@ func Checks(ctx context.Context, cfg *config.Config) []Check {
 	add := func(s Status, name, detail, fix string) { checks = append(checks, Check{s, name, detail, fix}) }
 
 	if cfg.Path == "" {
-		add(Warn, "config", "no saw.json found", "optional: add one to name your apps and areas, or pass --app <package or bundle id>")
+		add(Warn, "config", "no saw.json found", "optional: add one to name your apps and scopes, or pass --app <package or bundle id>")
 	} else {
-		add(OK, "config", fmt.Sprintf("%s (%d apps, %d areas)", cfg.Path, len(cfg.Apps), len(cfg.AreaSet)), "")
+		add(OK, "config", fmt.Sprintf("%s (%d apps, %d scopes)", cfg.Path, len(cfg.Apps), len(cfg.ScopeSet)), "")
 	}
 
 	// Android

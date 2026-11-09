@@ -132,8 +132,8 @@ func TestStreamAndroid(t *testing.T) {
 		t.Errorf("want just the crash line as JSON, got %q", out)
 	}
 
-	cfg := writeConfig(t, `{"apps": {"main": {"android": "com.example.app"}}, "areas": ["http", "auth"], "android": {"tag": "Example{Area}"}}`)
-	out, _, err = saw(t, "", "stream", "--config", cfg, "--area", "http", "--platform", "android", "--device", "pixel")
+	cfg := writeConfig(t, `{"apps": {"main": {"android": "com.example.app"}}, "scopes": ["http", "auth"], "android": {"tag": "Example{Scope}"}}`)
+	out, _, err = saw(t, "", "stream", "--config", cfg, "--scope", "http", "--platform", "android", "--device", "pixel")
 	if err != nil || !strings.Contains(out, "http") {
 		t.Errorf("got %q %v", out, err)
 	}
@@ -165,9 +165,9 @@ func TestStreamErrors(t *testing.T) {
 			t.Errorf("%v: want a usage error, got %v", args, err)
 		}
 	}
-	cfg := writeConfig(t, `{"apps": {"main": {"android": "com.example.app"}}, "areas": ["http"]}`)
-	if _, _, err := saw(t, "", "stream", "--config", cfg, "--area", "nope"); !isUsage(err) {
-		t.Errorf("unknown area: %v", err)
+	cfg := writeConfig(t, `{"apps": {"main": {"android": "com.example.app"}}, "scopes": ["http"]}`)
+	if _, _, err := saw(t, "", "stream", "--config", cfg, "--scope", "nope"); !isUsage(err) {
+		t.Errorf("unknown scope: %v", err)
 	}
 	if _, _, err := saw(t, "", "stream", "--config", writeConfig(t, "{"), "--app", "com.x"); err == nil || isUsage(err) {
 		t.Errorf("broken saw.json: %v", err)

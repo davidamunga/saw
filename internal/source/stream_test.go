@@ -60,28 +60,28 @@ func TestStreamAndroidAllLines(t *testing.T) {
 	}
 }
 
-func TestStreamAndroidAreas(t *testing.T) {
+func TestStreamAndroidScopes(t *testing.T) {
 	androidTools(t)
 	tag := func(a string) string { return "Example" + strings.ToUpper(a[:1]) + a[1:] }
-	got, err := collect(t, Spec{Device: pixel, App: app, Areas: []string{"http", "auth"}, TagFor: tag})
+	got, err := collect(t, Spec{Device: pixel, App: app, Scopes: []string{"http", "auth"}, TagFor: tag})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The fake ignores logcat's tag filter, so check the mapping: tags become areas.
-	var areas []string
+	// The fake ignores logcat's tag filter, so check the mapping: tags become scopes.
+	var scopes []string
 	for _, e := range got {
-		if e.Area != "" {
-			areas = append(areas, e.Area)
+		if e.Scope != "" {
+			scopes = append(scopes, e.Scope)
 		}
 	}
-	if strings.Join(areas, ",") != "http,auth" {
-		t.Errorf("got areas %v", areas)
+	if strings.Join(scopes, ",") != "http,auth" {
+		t.Errorf("got scopes %v", scopes)
 	}
 }
 
 func TestStreamAndroidRawTags(t *testing.T) {
 	androidTools(t)
-	got, err := collect(t, Spec{Device: pixel, App: app, Areas: []string{"examplehttp"}, Chosen: true})
+	got, err := collect(t, Spec{Device: pixel, App: app, Scopes: []string{"examplehttp"}, Chosen: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestStreamSimulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Area != "auth" || got[1].Area != "calls" || got[0].Device != "iPhone 17 Pro" {
+	if len(got) != 2 || got[0].Scope != "auth" || got[1].Scope != "calls" || got[0].Device != "iPhone 17 Pro" {
 		t.Errorf("got %+v", got)
 	}
 	runtest.Install(t, runtest.Rule{Cmd: "xcrun simctl appinfo", Exit: 1})
@@ -138,12 +138,12 @@ func TestStreamIOSDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Category != "http" || got[0].Area != "" {
+	if len(got) != 1 || got[0].Category != "http" || got[0].Scope != "" {
 		t.Errorf("got %+v", got)
 	}
-	// With the convention, the subsystem's category becomes the area.
+	// With the convention, the subsystem's category becomes the scope.
 	got, _ = collect(t, Spec{Device: iphone, App: app, Subsystem: "com.example.app"})
-	if len(got) != 1 || got[0].Area != "http" {
+	if len(got) != 1 || got[0].Scope != "http" {
 		t.Errorf("got %+v", got)
 	}
 	// --all keeps everything the process logs.

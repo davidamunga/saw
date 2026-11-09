@@ -16,9 +16,9 @@ type Spec struct {
 	Device    device.Device
 	App       config.App
 	Subsystem string              // iOS: the app's Logger subsystem; "" = all but Apple's own lines
-	Areas     []string            // the project's areas; empty means no area filter
-	Chosen    bool                // Areas were picked with --area, not just every configured area
-	TagFor    func(string) string // Android: area → logcat tag; nil when the project has none
+	Scopes    []string            // the project's scopes; empty means no scope filter
+	Chosen    bool                // Scopes were picked with --scope, not just every configured scope
+	TagFor    func(string) string // Android: scope → logcat tag; nil when the project has none
 	All       bool                // everything the app's process logs, not only its own lines
 	OnStart   func()              // called once the app is found, just before lines start
 }
@@ -59,10 +59,10 @@ func (s Spec) checkIOS() error {
 	return nil
 }
 
-// setArea names an iOS line's area: its category, when it's in the app's own subsystem.
-func (s Spec) setArea(e *event.Event) {
+// setScope names an iOS line's scope: its category, when it's in the app's own subsystem.
+func (s Spec) setScope(e *event.Event) {
 	if s.Subsystem != "" && e.Subsystem == s.Subsystem {
-		e.Area = e.Category
+		e.Scope = e.Category
 	}
 }
 
@@ -75,7 +75,7 @@ func (s Spec) keepIOS(e event.Event) bool {
 	if s.All {
 		return true
 	}
-	if s.Chosen && !containsFold(s.Areas, e.Category) {
+	if s.Chosen && !containsFold(s.Scopes, e.Category) {
 		return false
 	}
 	if s.Subsystem != "" {

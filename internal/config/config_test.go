@@ -22,14 +22,14 @@ func TestLoadExample(t *testing.T) {
 	if got := c.Subsystem(app); got != "com.example.app" {
 		t.Error(got)
 	}
-	if _, _, err := c.Areas([]string{"nope"}); err == nil {
-		t.Error("unknown area should fail")
+	if _, _, err := c.Scopes([]string{"nope"}); err == nil {
+		t.Error("unknown scope should fail")
 	}
-	areas, chosen, _ := c.Areas([]string{"auth", "api", "auth"})
-	if !chosen || len(areas) != 2 {
-		t.Errorf("got %v %v", areas, chosen)
+	scopes, chosen, _ := c.Scopes([]string{"auth", "api", "auth"})
+	if !chosen || len(scopes) != 2 {
+		t.Errorf("got %v %v", scopes, chosen)
 	}
-	if all, chosen, _ := c.Areas(nil); chosen || len(all) != 5 {
+	if all, chosen, _ := c.Scopes(nil); chosen || len(all) != 5 {
 		t.Errorf("got %v %v", all, chosen)
 	}
 }
@@ -124,7 +124,7 @@ func TestTemplates(t *testing.T) {
 	if _, err := c.App("nodots"); err == nil {
 		t.Error("a bare name with no saw.json should fail")
 	}
-	c.Android.Tag = "{area}-{AREA}"
+	c.Android.Tag = "{scope}-{SCOPE}"
 	if got := c.TagFor()("api"); got != "api-API" {
 		t.Error(got)
 	}

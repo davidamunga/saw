@@ -88,7 +88,7 @@ func TestParseUnifiedLogFixture(t *testing.T) {
 }
 
 func TestSimPredicate(t *testing.T) {
-	s := Spec{Subsystem: "com.x.app", Areas: []string{"api", "auth"}}
+	s := Spec{Subsystem: "com.x.app", Scopes: []string{"api", "auth"}}
 	if got := simPredicate(s, "App"); got != `process == "App" AND subsystem == "com.x.app"` {
 		t.Error(got)
 	}
@@ -116,7 +116,7 @@ func TestExecutableLookups(t *testing.T) {
 
 func TestTagFor(t *testing.T) {
 	c := &config.Config{}
-	c.Android.Tag = "Example{Area}"
+	c.Android.Tag = "Example{Scope}"
 	if got := c.TagFor()("api"); got != "ExampleApi" {
 		t.Error(got)
 	}
@@ -152,9 +152,9 @@ func TestKeepIOSWithoutConvention(t *testing.T) {
 	}
 }
 
-func TestAreasWithoutConvention(t *testing.T) {
-	// No saw.json: --area names logcat tags (Android) or categories (iOS), in any case.
-	s := Spec{Areas: []string{"okhttp", "Sync"}, Chosen: true}
+func TestScopesWithoutConvention(t *testing.T) {
+	// No saw.json: --scope names logcat tags (Android) or categories (iOS), in any case.
+	s := Spec{Scopes: []string{"okhttp", "Sync"}, Chosen: true}
 	for tag, want := range map[string]bool{"OkHttp": true, "sync": true, "AndroidRuntime": true, "Choreographer": false} {
 		if got := s.keepAndroidTag(tag); got != want {
 			t.Errorf("tag %s: got %v", tag, got)
@@ -164,9 +164,9 @@ func TestAreasWithoutConvention(t *testing.T) {
 		t.Error("iOS category should match in any case")
 	}
 	if !(Spec{}).keepAndroidTag("Anything") {
-		t.Error("no --area keeps every tag")
+		t.Error("no --scope keeps every tag")
 	}
-	conv := Spec{Areas: []string{"api"}, Chosen: true, TagFor: func(a string) string { return "My" + a }}
+	conv := Spec{Scopes: []string{"api"}, Chosen: true, TagFor: func(a string) string { return "My" + a }}
 	if !conv.keepAndroidTag("Whatever") {
 		t.Error("with a tag convention, logcat filters, not this check")
 	}

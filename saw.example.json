@@ -9,7 +9,7 @@
       "ios": "com.example.admin"
     }
   },
-  "areas": ["api", "auth", "payments", "push", "ui"],
-  "android": { "tag": "Example{Area}" },
+  "scopes": ["api", "auth", "payments", "push", "ui"],
+  "android": { "tag": "Example{Scope}" },
   "ios": { "subsystem": "{bundle}" }
 }

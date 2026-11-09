@@ -33,7 +33,7 @@ func TestLabel(t *testing.T) {
 		e    Event
 		want string
 	}{
-		{Event{Area: "api", Category: "http", Tag: "T"}, "api"},
+		{Event{Scope: "api", Category: "http", Tag: "T"}, "api"},
 		{Event{Category: "http", Tag: "T"}, "http"},
 		{Event{Tag: "OkHttp"}, "OkHttp"},
 		{Event{Subsystem: "com.x"}, "com.x"},

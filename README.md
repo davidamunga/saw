@@ -48,7 +48,7 @@ Then run `saw doctor`. It checks each one, and your connected devices, and says 
 ```sh
 saw devices                                  # what's connected
 saw stream --app com.example.app             # an app's own logs, by package or bundle id
-saw stream --app com.example.app --area OkHttp,SyncWorker   # only these tags (Android) or categories (iOS)
+saw stream --app com.example.app --scope OkHttp,SyncWorker   # only these tags (Android) or categories (iOS)
 saw stream --app com.example.app --device pixel --level warn
 saw stream --app com.example.app --json > session.jsonl
 saw net --app com.example.app                # the app's network requests and connections
@@ -60,7 +60,7 @@ saw doctor                                   # what's missing, and how to fix it
 | Flag | Meaning |
 |---|---|
 | `--app <id or name>` | The app: its Android package name or iOS bundle id, or a name from `saw.json`. |
-| `--area <a,b>` | Only these areas. Without `saw.json` they're logcat tags (Android) or Logger categories (iOS), matched in any case. Repeatable. |
+| `--scope <a,b>` | Only these scopes. Without `saw.json` they're logcat tags (Android) or Logger categories (iOS), matched in any case. Repeatable. |
 | `--device <id or name>` | The device: its id, the start of its id, or all or part of its name (`pixel`, `"17 pro"`). |
 | `--platform android\|ios` | Only consider devices of one platform. |
 | `--level <level>` | The lowest level to show: `verbose`, `debug`, `info`, `warn`, `error` or `fatal`. Default `verbose`. |
@@ -81,7 +81,7 @@ With no `--device`, saw uses the only running device; with several, it asks whic
 - **iOS:** every line logged by code inside the app bundle (the app and the frameworks it ships):
   `Logger`/`os_log`, `NSLog`, CocoaLumberjack, React Native, Flutter. Apple's own framework lines are dropped.
 
-To find tag or category names for `--area`, run `saw stream` without it: the column after the level
+To find tag or category names for `--scope`, run `saw stream` without it: the column after the level
 letter shows each line's tag or category.
 
 ### JSON output
@@ -101,7 +101,7 @@ letter shows each line's tag or category.
 | `level` | `verbose`, `debug`, `info`, `warn`, `error` or `fatal`. |
 | `tag` | Android: the logcat tag. |
 | `subsystem`, `category` | iOS: the Logger subsystem and category. |
-| `area` | The area from `saw.json`, when the line belongs to one. |
+| `scope` | The scope from `saw.json`, when the line belongs to one. |
 | `message` | The log message. |
 
 Empty fields are left out.
@@ -132,8 +132,8 @@ mitmproxy or Proxyman alongside saw.
 
 ## saw.json
 
-Optional. It gives your apps short names and lists the project's log areas, so a team can run
-`saw stream --app main --area auth,api` without knowing package ids, tags or categories. Put it at
+Optional. It gives your apps short names and lists the project's log scopes, so a team can run
+`saw stream --app main --scope auth,api` without knowing package ids, tags or categories. Put it at
 the repo root; saw finds the nearest one above the working directory.
 
 ```json
@@ -142,8 +142,8 @@ the repo root; saw finds the nearest one above the working directory.
     "main": { "android": "com.example.app", "ios": "com.example.app" },
     "admin": { "android": "com.example.admin", "ios": "com.example.admin" }
   },
-  "areas": ["api", "auth", "payments", "push", "ui"],
-  "android": { "tag": "Example{Area}" },
+  "scopes": ["api", "auth", "payments", "push", "ui"],
+  "android": { "tag": "Example{Scope}" },
   "ios": { "subsystem": "{bundle}" }
 }
 ```
@@ -153,11 +153,11 @@ the repo root; saw finds the nearest one above the working directory.
 | `apps.<name>.android` | The app's Android package name. |
 | `apps.<name>.ios` | The app's iOS bundle id. |
 | `apps.<name>.process` | Optional. The iOS executable name; read from the device when left out. |
-| `areas` | The app's log areas, for `--area`. On iOS each is a Logger category. |
-| `android.tag` | The logcat tag for an area: `{Area}` → `Api`, `{area}` → `api`, `{AREA}` → `API`. |
+| `scopes` | The app's log scopes, for `--scope`. On iOS each is a Logger category. |
+| `android.tag` | The logcat tag for a scope: `{Scope}` → `Api`, `{scope}` → `api`, `{SCOPE}` → `API`. |
 | `ios.subsystem` | The app's Logger subsystem. Default `{bundle}`, the bundle id. |
 
-With `areas` set, saw shows only lines from those areas by default: logcat tags built from
+With `scopes` set, saw shows only lines from those scopes by default: logcat tags built from
 `android.tag`, and Logger lines in the app's subsystem on iOS. `--all` shows everything. With only
 one app listed, `--app` can be left out. A misspelled key is an error, not silently ignored.
 
@@ -180,7 +180,7 @@ and prints it:
 | An iPhone shows as not trusted | Unlock it and tap "Trust This Computer". |
 | `more than one device` | Pick one: `--platform android`, or `--device pixel`. |
 | `… is not installed on …` | Check the package or bundle id: `adb shell pm list packages \| grep example` on Android. |
-| Nothing appears | Is the app running and doing something? Lower `--level`, drop `--area`, or try `--all`. |
+| Nothing appears | Is the app running and doing something? Lower `--level`, drop `--scope`, or try `--all`. |
 | `saw net` shows nothing on Android | Connections are reported when they open, so make the app do something new. Long-lived connections opened before `saw net` started appear on its first look. |
 | iOS values show as `<private>` | Mark them `privacy: .public` in the `Logger` call. saw points this out when it sees one. |
 

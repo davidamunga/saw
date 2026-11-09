@@ -52,15 +52,15 @@ type Event struct {
 	Tag       string    `json:"tag,omitempty"`       // Android logcat tag
 	Subsystem string    `json:"subsystem,omitempty"` // iOS
 	Category  string    `json:"category,omitempty"`  // iOS
-	Area      string    `json:"area,omitempty"`      // the project's area, from saw.json
+	Scope     string    `json:"scope,omitempty"`     // the project's scope, from saw.json
 	Message   string    `json:"message"`
 }
 
-// Label is the short name shown beside a line: its area, else its category or tag.
+// Label is the short name shown beside a line: its scope, else its category or tag.
 func (e Event) Label() string {
 	switch {
-	case e.Area != "":
-		return e.Area
+	case e.Scope != "":
+		return e.Scope
 	case e.Category != "":
 		return e.Category
 	case e.Tag != "":

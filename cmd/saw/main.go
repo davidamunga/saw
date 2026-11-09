@@ -76,7 +76,7 @@ const usage = `saw: stream a mobile app's logs from any Android or iOS device.
 
 Usage:
   saw devices [--all] [--json]
-  saw stream  [--app <name|id>] [--area a,b] [--device <id|name>] [--platform android|ios]
+  saw stream  [--app <name|id>] [--scope a,b] [--device <id|name>] [--platform android|ios]
               [--level <level>] [--all] [--json]
   saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--json]
   saw doctor
@@ -190,8 +190,8 @@ func (l *listFlag) Set(v string) error {
 func streamCmd(ctx context.Context, args []string) error {
 	fs, cfgPath := newFlags("stream")
 	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
-	var areas listFlag
-	fs.Var(&areas, "area", "only these areas (comma list, repeatable)")
+	var scopes listFlag
+	fs.Var(&scopes, "scope", "only these scopes (comma list, repeatable)")
 	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
 	platform := fs.String("platform", "", "android or ios")
 	levelName := fs.String("level", "verbose", "lowest level to show: verbose, debug, info, warn, error, fatal")
@@ -208,7 +208,7 @@ func streamCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	selected, chosen, err := cfg.Areas(areas)
+	selected, chosen, err := cfg.Scopes(scopes)
 	if err != nil {
 		return usageError{err}
 	}
@@ -235,7 +235,7 @@ func streamCmd(ctx context.Context, args []string) error {
 	}
 	return source.Stream(ctx, source.Spec{
 		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
-		Areas: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all,
+		Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all,
 		OnStart: func() {
 			fmt.Fprintf(stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
 		},

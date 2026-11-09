@@ -16,15 +16,15 @@ import (
 const FileName = "saw.json"
 
 type Config struct {
-	Path    string         `json:"-"`
-	Apps    map[string]App `json:"apps"`
-	AreaSet []string       `json:"areas"`
-	Android struct {
-		// Tag is the logcat tag for an area, e.g. "Example{Area}". Empty: the app has no tag convention.
+	Path     string         `json:"-"`
+	Apps     map[string]App `json:"apps"`
+	ScopeSet []string       `json:"scopes"`
+	Android  struct {
+		// Tag is the logcat tag for a scope, e.g. "Example{Scope}". Empty: the app has no tag convention.
 		Tag string `json:"tag"`
 	} `json:"android"`
 	IOS struct {
-		// Subsystem is the app's Logger subsystem; areas are its categories. Default "{bundle}".
+		// Subsystem is the app's Logger subsystem; scopes are its categories. Default "{bundle}".
 		Subsystem string `json:"subsystem"`
 	} `json:"ios"`
 }
@@ -116,43 +116,43 @@ func (c *Config) App(name string) (App, error) {
 	return App{}, fmt.Errorf("unknown app %q (one of: %s)", name, strings.Join(c.appNames(), ", "))
 }
 
-// Areas resolves --area. With none chosen, every configured area and chosen=false.
-func (c *Config) Areas(selected []string) (areas []string, chosen bool, err error) {
+// Scopes resolves --scope. With none chosen, every configured scope and chosen=false.
+func (c *Config) Scopes(selected []string) (scopes []string, chosen bool, err error) {
 	if len(selected) == 0 {
-		return c.AreaSet, false, nil
+		return c.ScopeSet, false, nil
 	}
 	for _, a := range selected {
-		if len(c.AreaSet) > 0 && !slices.Contains(c.AreaSet, a) {
-			return nil, false, fmt.Errorf("unknown area %q (one of: %s)", a, strings.Join(c.AreaSet, ", "))
+		if len(c.ScopeSet) > 0 && !slices.Contains(c.ScopeSet, a) {
+			return nil, false, fmt.Errorf("unknown scope %q (one of: %s)", a, strings.Join(c.ScopeSet, ", "))
 		}
-		if !slices.Contains(areas, a) {
-			areas = append(areas, a)
+		if !slices.Contains(scopes, a) {
+			scopes = append(scopes, a)
 		}
 	}
-	return areas, true, nil
+	return scopes, true, nil
 }
 
-// TagFor maps an area to its logcat tag, or is nil when the project has no tag convention.
+// TagFor maps a scope to its logcat tag, or is nil when the project has no tag convention.
 func (c *Config) TagFor() func(string) string {
 	tmpl := c.Android.Tag
 	if tmpl == "" {
 		return nil
 	}
-	return func(area string) string {
-		title := area
-		if area != "" {
-			title = strings.ToUpper(area[:1]) + area[1:]
+	return func(scope string) string {
+		title := scope
+		if scope != "" {
+			title = strings.ToUpper(scope[:1]) + scope[1:]
 		}
-		return strings.NewReplacer("{Area}", title, "{area}", area, "{AREA}", strings.ToUpper(area)).Replace(tmpl)
+		return strings.NewReplacer("{Scope}", title, "{scope}", scope, "{SCOPE}", strings.ToUpper(scope)).Replace(tmpl)
 	}
 }
 
 // Subsystem is the app's iOS Logger subsystem, or "" when the project doesn't log to one.
-// A saw.json with areas implies the convention: subsystem = bundle id, area = category.
+// A saw.json with scopes implies the convention: subsystem = bundle id, scope = category.
 func (c *Config) Subsystem(app App) string {
 	tmpl := c.IOS.Subsystem
 	if tmpl == "" {
-		if len(c.AreaSet) == 0 {
+		if len(c.ScopeSet) == 0 {
 			return ""
 		}
 		tmpl = "{bundle}"

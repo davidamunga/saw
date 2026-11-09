@@ -34,7 +34,7 @@ func streamSimulator(ctx context.Context, s Spec, emit func(event.Event)) error 
 			return
 		}
 		e.Device = s.Device.Name
-		s.setArea(&e)
+		s.setScope(&e)
 		emit(e)
 	}, "xcrun", "simctl", "spawn", udid, "log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
 }
@@ -49,8 +49,8 @@ func simPredicate(s Spec, process string) string {
 		p += fmt.Sprintf(" AND subsystem == %q", s.Subsystem)
 	}
 	if s.Chosen {
-		quoted := make([]string, len(s.Areas))
-		for i, a := range s.Areas {
+		quoted := make([]string, len(s.Scopes))
+		for i, a := range s.Scopes {
 			quoted[i] = fmt.Sprintf("%q", a)
 		}
 		p += fmt.Sprintf(" AND category IN {%s}", strings.Join(quoted, ", "))
@@ -143,7 +143,7 @@ func streamIOSDevice(ctx context.Context, s Spec, emit func(event.Event)) error 
 		if !s.keepIOS(e) {
 			return
 		}
-		s.setArea(&e)
+		s.setScope(&e)
 		e.Device = s.Device.Name
 		emit(e)
 	}, "pymobiledevice3", "syslog", "live", "--udid", udid, "--format", "json", "--process-name", process)
