@@ -8,18 +8,19 @@
   <a href="https://pkg.go.dev/github.com/davidamunga/saw"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/davidamunga/saw.svg"></a>
 </p>
 
-Stream a mobile app's logs from any Android device or emulator, iOS simulator, or iPhone/iPad, with
-one command.
+saw shows a mobile app's logs and network requests, live, from any Android device or emulator, iOS
+simulator, or iPhone/iPad, with one command.
 
 <p align="center">
   <img alt="saw net showing a demo app's requests live on an Android phone, then the same requests as curl commands" src="assets/saw-demo.gif" width="800">
 </p>
 
 - **One command for every device.** Android and iOS, emulators, simulators and physical devices.
-- **Your app's lines only.** No setup and no filters to write: saw keeps your app's own logs and
-  drops the system's.
+- **Your app only.** No filters to write: saw keeps your app's lines and drops the system's.
+- **Full HTTP requests.** Method, URL, status, headers and bodies, from the logging debug builds
+  already do, ready to copy as plain HTTP or curl. No proxy, no certificates, no app changes.
 - **Survives restarts and crashes.** Relaunch the app and the stream carries on.
-- **Works anywhere a terminal does.** Pretty output for people, `--json` for scripts, CI and agents.
+- **Made for terminals.** Aligned, copiable output for people; `--json` for scripts, CI and agents.
 
 ## Install
 
@@ -31,8 +32,6 @@ go install github.com/davidamunga/saw/cmd/saw@latest  # anywhere with Go
 Or download a binary for macOS, Linux or Windows from the
 [releases](https://github.com/davidamunga/saw/releases).
 
-### Requirements
-
 saw drives the tools that already talk to devices. Install the ones for the devices you use:
 
 | To read | You need | Install |
@@ -41,162 +40,135 @@ saw drives the tools that already talk to devices. Install the ones for the devi
 | iOS simulators | Xcode (macOS only) | the Mac App Store |
 | iPhones and iPads | pymobiledevice3 | `pipx install pymobiledevice3`; on Linux also usbmuxd, on Windows the Apple Devices app |
 
-Then run `saw doctor`. It checks each one, and your connected devices, and says how to fix what's missing.
+Then run `saw doctor`: it checks each tool and every connected device, and says how to fix
+anything missing.
 
-## Usage
+## Quick start
 
 ```sh
-saw devices                                  # what's connected
-saw stream --app com.example.app             # an app's own logs, by package or bundle id
-saw stream --app com.example.app --scope OkHttp,SyncWorker   # only these tags (Android) or categories (iOS)
-saw stream --app com.example.app --device pixel --level warn
-saw stream --app com.example.app --json > session.jsonl
-saw net --app com.example.app                # the app's network requests and connections
-saw net --app com.example.app --full         # requests the app logs, as plain HTTP (.http files)
-saw net --app com.example.app --curl         # requests the app logs, as curl commands
-saw doctor                                   # what's missing, and how to fix it
+saw devices                                 # what's connected
+saw stream --app com.example.app            # the app's logs
+saw net --app com.example.app               # the app's network requests
+saw net --app com.example.app --full        # ... with headers and bodies, as plain HTTP
 ```
 
-### `saw stream`
-
-| Flag | Meaning |
-|---|---|
-| `--app <id or name>` | The app: its Android package name or iOS bundle id, or a name from `saw.json`. |
-| `--scope <a,b>` | Only these scopes. Without `saw.json` they're logcat tags (Android) or Logger categories (iOS), matched in any case. Repeatable. |
-| `--device <id or name>` | The device: its id, the start of its id, or all or part of its name (`pixel`, `"17 pro"`). |
-| `--platform android\|ios` | Only consider devices of one platform. |
-| `--level <level>` | The lowest level to show: `verbose`, `debug`, `info`, `warn`, `error` or `fatal`. Default `verbose`. |
-| `--all` | Everything the app's process logs, system and framework lines included. |
-| `--json` | One JSON object per line instead of the readable format. |
-| `--config <path>` | A `saw.json` other than the nearest one. |
-
+`--app` takes an Android package name or iOS bundle id, or a short name from [`saw.json`](#sawjson).
 With no `--device`, saw uses the only running device; with several, it asks which one.
 
-`saw devices` takes `--all` (to include shut-down simulators) and `--json`.
+## Logs: `saw stream`
 
-`saw net` takes `--app`, `--device`, `--platform`, `--json` and `--config`, the same as `saw stream`,
-plus `--full` or `--curl` for the requests the app logs itself, and `--connections` to keep showing
-connections once it has logged a request.
+```
+09:41:02.114 I MainActivity       onCreate
+09:41:02.380 D OkHttp             --> GET https://api.example.com/v1/orders
+09:41:03.002 W SyncWorker         upload failed, retrying (attempt 2 of 5)
+09:41:03.441 E Checkout           payment failed: card declined
+```
 
-### What "the app's own logs" means
+saw shows the app's own lines:
 
 - **Android:** every line written by the app's process, matched by its user id: `Log`, Timber,
-  `println`, Flutter, React Native, crashes.
+  `println`, Flutter, React Native, and crashes.
 - **iOS:** every line logged by code inside the app bundle (the app and the frameworks it ships):
-  `Logger`/`os_log`, `NSLog`, CocoaLumberjack, React Native, Flutter. Apple's own framework lines are dropped.
+  `Logger`/`os_log`, `NSLog`, CocoaLumberjack, React Native, Flutter. Apple's framework lines are
+  dropped.
 
-To find tag or category names for `--scope`, run `saw stream` without it: the column after the level
-letter shows each line's tag or category.
+`--scope` narrows it to some tags (Android) or Logger categories (iOS), matched in any case:
+`--scope okhttp,syncworker`. To find the names, run `saw stream` once without it: the column after
+the level letter is each line's tag or category. `--level warn` hides everything below warnings,
+and `--all` shows everything the process logs, system lines included.
 
-### JSON output
+## Network: `saw net`
 
-`--json` prints one object per line:
+### Requests the app logs
 
-```json
-{"time":"2026-11-09T09:41:02.38+03:00","platform":"android","device":"Pixel 8","process":"com.example.app","pid":4821,"tid":4870,"level":"debug","tag":"OkHttp","message":"--> GET https://api.example.com/v1/orders"}
-```
-
-| Field | Meaning |
-|---|---|
-| `time` | When the line was logged, with the time zone offset. |
-| `platform`, `device` | `android` or `ios`, and the device's name. |
-| `process`, `pid`, `tid` | The app's process, process id and thread id. |
-| `sender` | iOS: the binary or library that logged the line. |
-| `level` | `verbose`, `debug`, `info`, `warn`, `error` or `fatal`. |
-| `tag` | Android: the logcat tag. |
-| `subsystem`, `category` | iOS: the Logger subsystem and category. |
-| `scope` | The scope from `saw.json`, when the line belongs to one. |
-| `message` | The log message. |
-
-Empty fields are left out.
-
-## Network requests: `saw net`
-
-`saw net` shows an app's network activity, for any app, without changing it, without a proxy and
-without installing certificates. What it can see depends on the platform:
-
-| Device | Shows | From |
-|---|---|---|
-| iOS simulator | each request's **URL**, status, time, protocol and size | Apple's networking logs in the app's process |
-| iPhone / iPad | each request's status, time and size, and the **hostname** of each new connection | the same logs (iOS hides URLs on devices), and a packet capture of the app (the TLS server name) |
-| Android | each new **connection**, named by the hostnames the app's own log mentions (or reverse DNS), and the app's **HTTP log lines**: URLs, status codes, OkHttp's `-->`/`<--` | the kernel's socket table, which adb can read, and the app's log |
+Debug builds usually log every request they make: OkHttp's `HttpLoggingInterceptor` on Android,
+and loggers like it on iOS. `saw net` assembles that logging into one line per request, on every
+platform, under any tag or category:
 
 ```
-09:41:02.114  TLS                         api.example.com:443  203.0.113.7             (iPhone)
-09:41:02.918  REQ    200   605ms  3.3 KB  (connection 1)  h2                          (iPhone)
-09:41:03.002  TCP                         api.example.com:443  203.0.113.7             (Android)
-09:41:03.380  REQ    200   538ms  3.3 KB  https://api.example.com/v1/orders  h2       (simulator)
+09:41:02.792  GET    200   538ms   163 B  https://api.example.com/v1/orders
+09:41:03.380  POST   402   412ms    61 B  https://api.example.com/v1/payments
+09:41:05.020  POST   201   301ms    51 B  https://api.example.com/v1/payments
 ```
 
-HTTPS stays encrypted on the network: there, you see where an app connects and how requests went.
-Several requests often share one connection, so on iPhone and Android a connection line can stand
-for many requests.
-
-### Full requests, from the app's own HTTP logging
-
-Debug builds often log every request: OkHttp's `HttpLoggingInterceptor` on Android, and loggers
-like it on iOS. `saw net` assembles those logs into one line per request, on every platform and
-under any tag or category, and `--full` adds the headers and bodies:
-
-```
-09:41:02.792  GET    200  1188ms    97 B  https://api.example.com/mobile-config
-09:41:03.380  POST   201   412ms    34 B  https://api.example.com/v1/orders
-```
-
-Each line has the same columns: time, method, status, duration, size, and the full URL last, so
-it stays aligned and copies cleanly. Once the app has logged a request, connection lines stop;
-`--connections` keeps them.
+Every line has the same columns (time, method, status, duration, size) and the full URL last, so it
+stays aligned and copies cleanly. Lines are stamped when each request finished.
 
 `--full` prints each request as plain HTTP, in the `.http` file format that VS Code's REST Client
-and JetBrains' HTTP Client can send again; everything else becomes `#` comments:
+and JetBrains' HTTP Client can send again. JSON bodies are indented; everything else is a `#`
+comment:
 
 ```
-### 09:41:03.380  POST 201  412ms
-POST https://api.example.com/v1/orders
+### 09:41:05.020  POST 201  301ms
+POST https://api.example.com/v1/payments
 Content-Type: application/json
+Authorization: Bearer ****
 
 {
-  "item": "1042"
+  "order": "1042",
+  "amount": 2400
 }
 
 HTTP 201
 content-type: application/json
 
 {
-  "id": "ord_88",
-  "status": "created"
+  "id": "pay_88",
+  "status": "succeeded"
 }
 ```
 
-`--curl` prints each as a curl command instead:
+`--curl` prints each request as a curl command, to paste and send again:
 
 ```sh
-curl -X POST 'https://api.example.com/v1/orders' \
+curl -X POST 'https://api.example.com/v1/payments' \
   -H 'Content-Type: application/json' \
-  --data-raw '{"item":"1042"}'
+  -H 'Authorization: Bearer ****' \
+  --data-raw '{"order":"1042","amount":2400}'
 ```
 
-It knows three formats:
+saw knows three logging formats:
 
 | Format | Used by | Looks like |
 |---|---|---|
-| OkHttp-style | OkHttp and Retrofit, and the many loggers that copy it | `--> POST https://…`, headers, body, `<-- 201 https://… (412ms)` |
+| OkHttp-style | OkHttp and Retrofit, and the many loggers that copy it | `--> POST https://…`, headers, body, `<-- 201 https://… (301ms)` |
 | Ktor | Ktor's `Logging` plugin | `REQUEST: https://…`, `METHOD: …`, `RESPONSE: 200 OK` |
 | Dio | Flutter's Dio `LogInterceptor` | `*** Request ***`, `uri: …`, `statusCode: …` |
 
-Other HTTP-looking lines the app logs (a URL, or a status code) appear as `LOG` lines. What you see
-is what the app logs: its log level decides whether headers and bodies are included (OkHttp's
-`Level.BODY`), and its own redaction (`Authorization: ██`) stays. Logs cap each message's size,
-about 4 KB on Android unless the app splits long bodies (OkHttp's own logger does) and about 1 KB
-on iOS, so long bodies can be cut short; `--full` says so when a body is shorter than its
-`Content-Length`. An app that doesn't log its requests shows only the
-network view above.
+Other HTTP-looking lines the app logs (with a URL or a status code in them) appear as `LOG` lines.
+
+What you see is what the app logs: its log level decides whether headers and bodies are included
+(OkHttp's `Level.BODY`), and its own redaction of tokens stays. Logs also cap each message's size,
+at about 4 KB on Android and 1 KB on iOS, so long bodies can be cut short; `--full` says so when a
+body is shorter than its `Content-Length`.
+
+### The network itself
+
+For apps that don't log their requests, and for everything before an app logs its first one,
+`saw net` shows what each platform exposes about the app's traffic, without changing anything on
+the device:
+
+| Device | Shows | From |
+|---|---|---|
+| iOS simulator | each request's URL, status, time, protocol and size | Apple's networking logs in the app's process |
+| iPhone / iPad | each request's status, time and size, and each new connection's hostname | the same logs (iOS hides URLs on devices), and a packet capture of the app (the TLS server name) |
+| Android | each new connection, named by hostnames the app's log mentions, or reverse DNS | the kernel's socket table, which adb can read |
+
+```
+09:41:02.114  TLS                         api.example.com:443  203.0.113.7
+09:41:02.918  REQ    200   605ms  3.3 KB  (connection 1)  h2
+09:41:03.002  TCP                         api.example.com:443  203.0.113.7
+```
+
+HTTPS stays encrypted on the network, so this view shows where the app connects and how requests
+went, not their contents. Once the app has logged a request, these lines stop, since the logged
+requests say more; `--connections` keeps them.
 
 ## saw.json
 
-Optional. It gives your apps short names and lists the project's log scopes, so a team can run
-`saw stream --app main --scope auth,api` without knowing package ids, tags or categories. Put it at
-the repo root; saw finds the nearest one above the working directory.
+Optional. It gives a project's apps short names and lists its log scopes, so a team can run
+`saw stream --app main --scope auth` without knowing package ids, tags or categories. Put it at the
+repo root; saw finds the nearest one above the working directory, and `--config` points at another.
 
 ```json
 {
@@ -219,20 +191,67 @@ the repo root; saw finds the nearest one above the working directory.
 | `android.tag` | The logcat tag for a scope: `{Scope}` → `Api`, `{scope}` → `api`, `{SCOPE}` → `API`. |
 | `ios.subsystem` | The app's Logger subsystem. Default `{bundle}`, the bundle id. |
 
-With `scopes` set, saw shows only lines from those scopes by default: logcat tags built from
-`android.tag`, and Logger lines in the app's subsystem on iOS. `--all` shows everything. With only
-one app listed, `--app` can be left out. A misspelled key is an error, not silently ignored.
+With `scopes` set, `saw stream` shows only those scopes by default: the logcat tags `android.tag`
+builds, and Logger lines in the app's subsystem on iOS. `--all` shows everything. With one app
+listed, `--app` can be left out. A misspelled key or scope is an error, not silently ignored.
+
+## Commands
+
+| Command | Flags |
+|---|---|
+| `saw devices` | `--all` includes shut-down simulators; `--json` |
+| `saw stream` | `--app`, `--device`, `--platform android\|ios`, `--scope a,b` (repeatable), `--level verbose\|debug\|info\|warn\|error\|fatal`, `--all`, `--json` |
+| `saw net` | `--app`, `--device`, `--platform`, and one of `--full`, `--curl` or `--json`; `--connections` |
+| `saw doctor` | |
+| `saw version` | |
+
+Every command takes `--config <path>`. `--device` takes a device's id, the start of its id, or all
+or part of its name (`pixel`, `"17 pro"`).
+
+### JSON
+
+`--json` prints one object per line, leaving out empty fields. `saw stream`:
+
+```json
+{"time":"2026-11-09T09:41:02.38+03:00","platform":"android","device":"Pixel 8","process":"com.example.app","pid":4821,"tid":4870,"level":"debug","tag":"OkHttp","message":"--> GET https://api.example.com/v1/orders"}
+```
+
+| Field | Meaning |
+|---|---|
+| `time` | When the line was logged. |
+| `platform`, `device` | `android` or `ios`, and the device's name. |
+| `process`, `pid`, `tid`, `sender` | The app's process, its ids, and on iOS the binary or library that logged the line. |
+| `level` | `verbose`, `debug`, `info`, `warn`, `error` or `fatal`. |
+| `tag`, `subsystem`, `category`, `scope` | The logcat tag (Android), Logger subsystem and category (iOS), and the `saw.json` scope. |
+| `message` | The log message. |
+
+`saw net`:
+
+```json
+{"time":"2026-11-09T09:41:05.02+03:00","started":"2026-11-09T09:41:04.72+03:00","platform":"android","device":"Pixel 8","kind":"logged","url":"https://api.example.com/v1/payments","method":"POST","status":201,"duration_ms":301,"request_headers":[{"name":"Content-Type","value":"application/json"}],"request_body":"{\"order\":\"1042\"}","response_body":"{\"id\":\"pay_88\"}"}
+```
+
+| Field | Meaning |
+|---|---|
+| `kind` | `logged` (a request the app logged), `request` (from Apple's networking logs), `http` (plain HTTP seen on the network), `tls`, `tcp`, `udp`, `dns` (connections), or `log` (another HTTP-looking log line). |
+| `time`, `started` | When it happened, or for requests when they finished; and when a logged request was sent. |
+| `method`, `url`, `status`, `duration_ms`, `failed`, `error` | The request, its outcome and timing. |
+| `request_headers`, `request_body`, `response_headers`, `response_body` | For logged requests: what the app's logging included. |
+| `host`, `ip`, `port`, `protocol`, `bytes`, `connection`, `cached` | Network details, where the platform gives them. |
+| `log`, `tag`, `level` | For `log` lines: the line, its tag or category, and its level. |
 
 ## How it works
 
 saw starts the tool that reads each kind of device, turns its output into one format, filters it
-and prints it:
+to the app, and prints it:
 
-| Target | Tool | Host |
+| Device | Logs | Network |
 |---|---|---|
-| Android device or emulator | `adb logcat`, filtered by the app's user id, so it survives restarts and crashes | any |
-| iOS simulator | `xcrun simctl spawn … log stream` | macOS |
-| iPhone / iPad | `pymobiledevice3 syslog live`, which keeps each line's subsystem and category | any |
+| Android device or emulator | `adb logcat`, filtered by the app's user id | the app's log, and its sockets in `/proc/net` (via adb) |
+| iOS simulator (macOS) | `xcrun simctl spawn … log stream` | the app's log, and Apple's networking logs |
+| iPhone / iPad | `pymobiledevice3 syslog live`, keeping each line's subsystem and category | the app's log, Apple's networking logs, and `pymobiledevice3 pcap` for TLS server names |
+
+It never installs anything on the device or changes its settings.
 
 ## Troubleshooting
 
@@ -243,7 +262,9 @@ and prints it:
 | `more than one device` | Pick one: `--platform android`, or `--device pixel`. |
 | `… is not installed on …` | Check the package or bundle id: `adb shell pm list packages \| grep example` on Android. |
 | Nothing appears | Is the app running and doing something? Lower `--level`, drop `--scope`, or try `--all`. |
-| `saw net` shows nothing on Android | Connections are reported when they open, so make the app do something new. Long-lived connections opened before `saw net` started appear on its first look. |
+| `saw net` shows only `TCP`, `TLS` or `REQ` lines | The app doesn't log its requests (or not in a format saw knows). Turn on its HTTP logging in debug builds, e.g. OkHttp's `HttpLoggingInterceptor`. |
+| `(connection 1)` instead of a URL on an iPhone | iOS hides URLs on devices; the `TLS` line for that connection names its host. |
+| `# body cut short in the app's log` | The log's message size limit cut the body. On Android, log long bodies in pieces under 4000 characters, as OkHttp's own logger does. |
 | iOS values show as `<private>` | Mark them `privacy: .public` in the `Logger` call. saw points this out when it sees one. |
 
 Known limits:
@@ -251,7 +272,7 @@ Known limits:
 - iOS: Swift `print` and `printf` write to stdout, not the system log, so no tool can read them
   from a device; only Xcode, attached at launch, sees them. Use `Logger`, `os_log` or `NSLog`.
 - iOS app extensions (widgets, notification services) run as their own processes and aren't included.
-- Release builds may strip logging; saw only shows what the app emits.
+- Release builds often strip logging; saw shows only what the app emits.
 
 ## Develop
 
@@ -260,10 +281,12 @@ go test ./...
 go build -o bin/saw ./cmd/saw
 ```
 
-`testdata/` holds real captured log output that the parser tests run against.
+Tests run saw against fake `adb`, `xcrun` and `pymobiledevice3` (see `internal/runtest`), so they
+need no devices; `testdata/` holds real captured log output for the parsers.
 
 To release, tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The release
-workflow builds every platform with GoReleaser, publishes a GitHub release and updates the Homebrew tap.
+workflow builds every platform with GoReleaser, publishes a GitHub release and updates the Homebrew
+tap.
 
 ## License
 

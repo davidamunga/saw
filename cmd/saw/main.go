@@ -72,7 +72,7 @@ func wantColor(v any) bool {
 	return ok && output.WantColor(f)
 }
 
-const usage = `saw: stream a mobile app's logs from any Android or iOS device.
+const usage = `saw: a mobile app's logs and network requests, from any Android or iOS device.
 
 Usage:
   saw devices [--all] [--json]
