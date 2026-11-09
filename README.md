@@ -51,6 +51,7 @@ saw stream --app com.example.app             # an app's own logs, by package or 
 saw stream --app com.example.app --area OkHttp,SyncWorker   # only these tags (Android) or categories (iOS)
 saw stream --app com.example.app --device pixel --level warn
 saw stream --app com.example.app --json > session.jsonl
+saw net --app com.example.app                # the app's network requests and connections
 saw doctor                                   # what's missing, and how to fix it
 ```
 
@@ -70,6 +71,8 @@ saw doctor                                   # what's missing, and how to fix it
 With no `--device`, saw uses the only running device; with several, it asks which one.
 
 `saw devices` takes `--all` (to include shut-down simulators) and `--json`.
+
+`saw net` takes `--app`, `--device`, `--platform`, `--json` and `--config`, the same as `saw stream`.
 
 ### What "the app's own logs" means
 
@@ -102,6 +105,29 @@ letter shows each line's tag or category.
 | `message` | The log message. |
 
 Empty fields are left out.
+
+## Network requests: `saw net`
+
+`saw net` shows an app's network activity, for any app, without changing it, without a proxy and
+without installing certificates. What it can see depends on the platform:
+
+| Device | Shows | From |
+|---|---|---|
+| iOS simulator | each request's **URL**, status, time, protocol and size | Apple's networking logs in the app's process |
+| iPhone / iPad | each request's status, time and size, and the **hostname** of each new connection | the same logs (iOS hides URLs on devices), and a packet capture of the app (the TLS server name) |
+| Android | each new **connection**: address, port, and a name where reverse DNS has one | the kernel's socket table, which adb can read |
+
+```
+09:41:02.380 200  https://api.example.com/v1/orders  538ms h2 3.3 KB     (simulator)
+09:41:02.114 TLS  api.example.com:443  203.0.113.7                         (iPhone)
+09:41:02.918 200  (connection 1)  605ms h2 3.3 KB                         (iPhone)
+09:41:03.002 TCP  ec2-203-0-113-7.compute-1.amazonaws.com:443  203.0.113.7  (Android)
+```
+
+HTTPS stays encrypted: you see where an app connects and how requests went, not headers or
+bodies. Several requests often share one connection, so on iPhone and Android a connection line
+can stand for many requests. For full request contents, use an intercepting proxy such as
+mitmproxy or Proxyman alongside saw.
 
 ## saw.json
 
@@ -154,6 +180,7 @@ and prints it:
 | `more than one device` | Pick one: `--platform android`, or `--device pixel`. |
 | `… is not installed on …` | Check the package or bundle id: `adb shell pm list packages \| grep example` on Android. |
 | Nothing appears | Is the app running and doing something? Lower `--level`, drop `--area`, or try `--all`. |
+| `saw net` shows nothing on Android | Connections are reported when they open, so make the app do something new. Long-lived connections opened before `saw net` started appear on its first look. |
 | iOS values show as `<private>` | Mark them `privacy: .public` in the `Logger` call. saw points this out when it sees one. |
 
 Known limits:

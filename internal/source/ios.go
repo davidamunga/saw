@@ -19,15 +19,9 @@ func streamSimulator(ctx context.Context, s Spec, emit func(event.Event)) error 
 		return err
 	}
 	udid := s.Device.ID
-	process := s.App.Process
-	if process == "" {
-		out, err := run.Output(ctx, "xcrun", "simctl", "appinfo", udid, s.App.IOS)
-		if err == nil {
-			process = simExecutable(out)
-		}
-		if process == "" {
-			return fmt.Errorf("%s is not installed on %s", s.App.IOS, s.Device)
-		}
+	process, err := simProcess(ctx, s)
+	if err != nil {
+		return err
 	}
 	predicate := simPredicate(s, process)
 	s.started()
@@ -62,6 +56,33 @@ func simPredicate(s Spec, process string) string {
 		p += fmt.Sprintf(" AND category IN {%s}", strings.Join(quoted, ", "))
 	}
 	return p
+}
+
+// simProcess is the app's executable name on a simulator, which is also its process name.
+func simProcess(ctx context.Context, s Spec) (string, error) {
+	if s.App.Process != "" {
+		return s.App.Process, nil
+	}
+	out, err := run.Output(ctx, "xcrun", "simctl", "appinfo", s.Device.ID, s.App.IOS)
+	if p := simExecutable(out); err == nil && p != "" {
+		return p, nil
+	}
+	return "", fmt.Errorf("%s is not installed on %s", s.App.IOS, s.Device)
+}
+
+// deviceProcess is the app's executable name on an iPhone or iPad.
+func deviceProcess(ctx context.Context, s Spec) (string, error) {
+	if s.App.Process != "" {
+		return s.App.Process, nil
+	}
+	out, err := run.Output(ctx, "pymobiledevice3", "apps", "query", "--udid", s.Device.ID, s.App.IOS)
+	if err != nil {
+		return "", err
+	}
+	if p := deviceExecutable([]byte(out), s.App.IOS); p != "" {
+		return p, nil
+	}
+	return "", fmt.Errorf("%s is not installed on %s", s.App.IOS, s.Device)
 }
 
 var simExecutableRe = regexp.MustCompile(`CFBundleExecutable = "?([^";]+)"?;`)
@@ -109,15 +130,9 @@ func streamIOSDevice(ctx context.Context, s Spec, emit func(event.Event)) error 
 		return err
 	}
 	udid := s.Device.ID
-	process := s.App.Process
-	if process == "" {
-		out, err := run.Output(ctx, "pymobiledevice3", "apps", "query", "--udid", udid, s.App.IOS)
-		if err != nil {
-			return err
-		}
-		if process = deviceExecutable([]byte(out), s.App.IOS); process == "" {
-			return fmt.Errorf("%s is not installed on %s", s.App.IOS, s.Device)
-		}
+	process, err := deviceProcess(ctx, s)
+	if err != nil {
+		return err
 	}
 	s.started()
 	return run.Lines(ctx, func(line string) {

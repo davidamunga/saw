@@ -38,6 +38,8 @@ func Output(ctx context.Context, name string, args ...string) (string, error) {
 // Ending through ctx (Ctrl-C) is not an error.
 func Lines(ctx context.Context, fn func(string), name string, args ...string) error {
 	cmd := Command(ctx, name, args...)
+	// pymobiledevice3 is Python, which holds output back when it isn't writing to a terminal.
+	cmd.Env = append(cmd.Environ(), "PYTHONUNBUFFERED=1")
 	var stderr tail
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()

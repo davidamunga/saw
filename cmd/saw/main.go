@@ -78,6 +78,7 @@ Usage:
   saw devices [--all] [--json]
   saw stream  [--app <name|id>] [--area a,b] [--device <id|name>] [--platform android|ios]
               [--level <level>] [--all] [--json]
+  saw net     [--app <name|id>] [--device <id|name>] [--platform android|ios] [--json]
   saw doctor
   saw version
 
@@ -113,6 +114,8 @@ func runCLI(ctx context.Context, args []string) error {
 		return devicesCmd(ctx, args[1:])
 	case "stream":
 		return streamCmd(ctx, args[1:])
+	case "net":
+		return netCmd(ctx, args[1:])
 	case "doctor":
 		return doctorCmd(ctx, args[1:])
 	case "version", "--version":
@@ -197,36 +200,20 @@ func streamCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
-	if *platform != "" && *platform != "android" && *platform != "ios" {
-		return usageError{fmt.Errorf("--platform must be android or ios")}
-	}
 	minLevel, err := event.ParseLevel(*levelName)
 	if err != nil {
 		return usageError{err}
 	}
-	cfg, err := config.Load(*cfgPath)
+	cfg, app, err := loadApp(*cfgPath, *appName, *platform)
 	if err != nil {
 		return err
-	}
-	app, err := cfg.App(*appName)
-	if err != nil {
-		return usageError{err}
 	}
 	selected, chosen, err := cfg.Areas(areas)
 	if err != nil {
 		return usageError{err}
 	}
-
-	devs, errs := device.List(ctx, false)
-	dev, err := device.Pick(devs, *deviceQuery, *platform)
-	var amb *device.AmbiguousError
-	if errors.As(err, &amb) && isTerminal(stdin) {
-		dev, err = choose(amb.Candidates)
-	}
+	dev, err := pickDevice(ctx, *deviceQuery, *platform)
 	if err != nil {
-		for _, e := range errs {
-			fmt.Fprintln(stderr, "saw:", e)
-		}
 		return err
 	}
 
@@ -253,6 +240,67 @@ func streamCmd(ctx context.Context, args []string) error {
 			fmt.Fprintf(stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
 		},
 	}, emit)
+}
+
+// loadApp reads saw.json and resolves --app, after checking --platform.
+func loadApp(cfgPath, appName, platform string) (*config.Config, config.App, error) {
+	if platform != "" && platform != "android" && platform != "ios" {
+		return nil, config.App{}, usageError{fmt.Errorf("--platform must be android or ios")}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil, config.App{}, err
+	}
+	app, err := cfg.App(appName)
+	if err != nil {
+		return nil, config.App{}, usageError{err}
+	}
+	return cfg, app, nil
+}
+
+// pickDevice finds the device to use, asking when several fit and stdin is a terminal.
+func pickDevice(ctx context.Context, query, platform string) (device.Device, error) {
+	devs, errs := device.List(ctx, false)
+	dev, err := device.Pick(devs, query, platform)
+	var amb *device.AmbiguousError
+	if errors.As(err, &amb) && isTerminal(stdin) {
+		dev, err = choose(amb.Candidates)
+	}
+	if err != nil {
+		for _, e := range errs {
+			fmt.Fprintln(stderr, "saw:", e)
+		}
+	}
+	return dev, err
+}
+
+func netCmd(ctx context.Context, args []string) error {
+	fs, cfgPath := newFlags("net")
+	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
+	deviceQuery := fs.String("device", "", "device or simulator id, id prefix or name")
+	platform := fs.String("platform", "", "android or ios")
+	asJSON := fs.Bool("json", false, "print one JSON event per line")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	cfg, app, err := loadApp(*cfgPath, *appName, *platform)
+	if err != nil {
+		return err
+	}
+	dev, err := pickDevice(ctx, *deviceQuery, *platform)
+	if err != nil {
+		return err
+	}
+	var printer output.NetPrinter = output.NewNetPretty(stdout, wantColor(stdout))
+	if *asJSON {
+		printer = output.NewNetJSON(stdout)
+	}
+	return source.StreamNet(ctx, source.Spec{
+		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
+		OnStart: func() {
+			fmt.Fprintf(stderr, "saw: %s network on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
+		},
+	}, printer.Print)
 }
 
 // choose asks which device to use when several fit.

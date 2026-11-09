@@ -1,0 +1,431 @@
+package source
+
+import (
+	"context"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/davidamunga/saw/internal/event"
+	"github.com/davidamunga/saw/internal/run"
+)
+
+// StreamNet sends the app's network requests and connections to emit until ctx ends. Nothing
+// is decrypted and nothing on the device is changed:
+//   - iOS simulator: Apple's networking logs from the app's process: URL, status, timing, size.
+//   - iPhone/iPad: the same logs (status, timing, size; iOS hides URLs on devices), plus a
+//     packet capture of the app for the hostname of each new connection (TLS server name).
+//   - Android: the app's TCP and UDP connections, from the kernel's socket table.
+func StreamNet(ctx context.Context, s Spec, emit func(event.Net)) error {
+	switch {
+	case s.Device.Platform == "android":
+		return netAndroid(ctx, s, emit)
+	case s.Device.Kind == "simulator":
+		return netSimulator(ctx, s, emit)
+	case s.Device.Platform == "ios":
+		return netIOSDevice(ctx, s, emit)
+	}
+	return fmt.Errorf("unsupported device %s", s.Device)
+}
+
+// ---- iOS: Apple's networking logs ----
+
+func netSimulator(ctx context.Context, s Spec, emit func(event.Net)) error {
+	if err := s.checkIOS(); err != nil {
+		return err
+	}
+	process, err := simProcess(ctx, s)
+	if err != nil {
+		return err
+	}
+	predicate := fmt.Sprintf(`process == %q AND (subsystem == "com.apple.CFNetwork" OR subsystem == "com.apple.network")`, process)
+	cf := newCFNetwork()
+	s.started()
+	return run.Lines(ctx, func(line string) {
+		if e, ok := ParseUnifiedLog([]byte(line)); ok {
+			if n, ok := cf.event(e); ok {
+				n.Platform, n.Device = "ios", s.Device.Name
+				emit(n)
+			}
+		}
+	}, "xcrun", "simctl", "spawn", s.Device.ID, "log", "stream", "--style", "ndjson", "--level", "debug", "--predicate", predicate)
+}
+
+func netIOSDevice(ctx context.Context, s Spec, emit func(event.Net)) error {
+	if err := s.checkIOS(); err != nil {
+		return err
+	}
+	process, err := deviceProcess(ctx, s)
+	if err != nil {
+		return err
+	}
+	var mu sync.Mutex
+	send := func(n event.Net) {
+		mu.Lock()
+		defer mu.Unlock()
+		n.Platform, n.Device = "ios", s.Device.Name
+		emit(n)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	udid := s.Device.ID
+	cf, pc := newCFNetwork(), &pcapParser{}
+	s.started()
+	errc := make(chan error, 2)
+	go func() {
+		errc <- run.Lines(ctx, func(line string) {
+			if e, ok := ParseDeviceLog([]byte(line)); ok {
+				if n, ok := cf.event(e); ok {
+					send(n)
+				}
+			}
+		}, "pymobiledevice3", "syslog", "live", "--udid", udid, "--format", "json", "--process-name", process)
+	}()
+	go func() {
+		errc <- run.Lines(ctx, func(line string) {
+			if n, ok := pc.line(line); ok {
+				send(n)
+			}
+		}, "pymobiledevice3", "pcap", "--udid", udid, "--process", process)
+	}()
+	err = <-errc // the first to stop ends both
+	cancel()
+	<-errc
+	return err
+}
+
+var (
+	// [C1 EB11… Hostname#30b4cfe5:443 quic-connection, url: https://example.com/, …] start
+	connStartRe = regexp.MustCompile(`^\[C(\d+) .*?url: ([^,\s]+)`)
+	// Task <…>.<1> summary for task success {transaction_duration_ms=941, response_status=200, …}
+	summaryRe = regexp.MustCompile(`summary for task (\w+) \{(.*)\}`)
+)
+
+// cfNetwork turns CFNetwork's per-request summaries into requests, naming each by the URL its
+// connection was opened for.
+type cfNetwork struct{ urls map[int]string }
+
+func newCFNetwork() *cfNetwork { return &cfNetwork{urls: map[int]string{}} }
+
+func (c *cfNetwork) event(e event.Event) (event.Net, bool) {
+	switch e.Subsystem {
+	case "com.apple.network":
+		if m := connStartRe.FindStringSubmatch(e.Message); m != nil && strings.HasPrefix(m[2], "http") {
+			n, _ := strconv.Atoi(m[1])
+			c.urls[n] = m[2]
+		}
+	case "com.apple.CFNetwork":
+		m := summaryRe.FindStringSubmatch(e.Message)
+		if m == nil {
+			return event.Net{}, false
+		}
+		kv := parseKV(m[2])
+		if kv["response_status"] == "-1" && kv["connection"] == "" {
+			return event.Net{}, false // a wrapper task's twin of a request already reported
+		}
+		n := event.Net{Time: e.Time, Kind: "request",
+			Status: atoi(kv["response_status"]), DurationMs: atoi(kv["transaction_duration_ms"]),
+			Bytes: atoi(kv["response_bytes"]), Protocol: kv["protocol"], Conn: atoi(kv["connection"]), Cached: kv["cache_hit"] == "true"}
+		n.Failed = m[1] != "success" && n.Status == 0
+		if u, ok := c.urls[n.Conn]; ok {
+			if pu, err := url.Parse(u); err == nil {
+				n.Host = pu.Hostname()
+			}
+			// A reused connection was opened for an earlier request, so only its host applies.
+			if kv["reused"] != "1" {
+				n.URL = u
+			}
+		}
+		return n, true
+	}
+	return event.Net{}, false
+}
+
+// parseKV reads `a=1, b="h2", c=false`.
+func parseKV(s string) map[string]string {
+	kv := map[string]string{}
+	for _, part := range strings.Split(s, ", ") {
+		if k, v, ok := strings.Cut(part, "="); ok {
+			kv[strings.TrimSpace(k)] = strings.Trim(v, `"`)
+		}
+	}
+	return kv
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+// ---- iPhone/iPad: packet capture ----
+
+// pymobiledevice3 pcap prints each packet as a header line, a hex dump, and a blank line:
+//
+//	2026-11-09 15:42:12.801991: Process Example (3126), Interface: en (ethernetCsmacd), Family: AF_INET
+//	00000000: 48 3A 02 52 D5 34 7A 5F  91 D6 DF 65 08 00 45 00  H:.R.4z_...e..E.
+var pcapHeadRe = regexp.MustCompile(`^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+): Process `)
+
+type pcapParser struct {
+	t   time.Time
+	buf []byte
+	in  bool
+}
+
+func (p *pcapParser) line(l string) (event.Net, bool) {
+	if m := pcapHeadRe.FindStringSubmatch(l); m != nil {
+		n, ok := p.flush()
+		p.t, _ = time.ParseInLocation("2006-01-02 15:04:05.999999", m[1], time.Local)
+		p.buf, p.in = p.buf[:0], true
+		return n, ok
+	}
+	if p.in && len(l) > 10 && l[8] == ':' {
+		end := min(58, len(l)) // the hex columns; the ASCII column starts after them
+		if b, err := hex.DecodeString(strings.ReplaceAll(l[10:end], " ", "")); err == nil {
+			p.buf = append(p.buf, b...)
+		}
+		return event.Net{}, false
+	}
+	if strings.TrimSpace(l) == "" {
+		return p.flush()
+	}
+	return event.Net{}, false
+}
+
+func (p *pcapParser) flush() (event.Net, bool) {
+	if !p.in {
+		return event.Net{}, false
+	}
+	p.in = false
+	n, ok := parsePacket(p.buf)
+	n.Time = p.t
+	return n, ok
+}
+
+// parsePacket finds a new HTTPS connection (its TLS server name) or a plain-HTTP request in
+// one packet: an Ethernet frame (Wi-Fi) or a bare IP packet (cellular).
+func parsePacket(b []byte) (event.Net, bool) {
+	ip := b
+	if len(b) >= 14 && (b[12] == 0x08 && b[13] == 0x00 || b[12] == 0x86 && b[13] == 0xDD) {
+		ip = b[14:]
+	}
+	var dst net.IP
+	var proto byte
+	var seg []byte
+	switch {
+	case len(ip) >= 20 && ip[0]>>4 == 4:
+		ihl := int(ip[0]&15) * 4
+		if len(ip) < ihl {
+			return event.Net{}, false
+		}
+		proto, dst, seg = ip[9], net.IP(ip[16:20]), ip[ihl:]
+	case len(ip) >= 40 && ip[0]>>4 == 6:
+		proto, dst, seg = ip[6], net.IP(ip[24:40]), ip[40:]
+	default:
+		return event.Net{}, false
+	}
+	if proto != 6 || len(seg) < 20 {
+		return event.Net{}, false
+	}
+	port := int(seg[2])<<8 | int(seg[3])
+	off := int(seg[12]>>4) * 4
+	if len(seg) < off {
+		return event.Net{}, false
+	}
+	data := seg[off:]
+	if host := tlsServerName(data); host != "" {
+		return event.Net{Kind: "tls", Host: host, IP: dst.String(), Port: port}, true
+	}
+	if method, host, path, ok := httpRequest(data); ok {
+		u := "http://" + host + path
+		if port != 80 {
+			u = "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + path
+		}
+		return event.Net{Kind: "http", Method: method, URL: u, Host: host, IP: dst.String(), Port: port}, true
+	}
+	return event.Net{}, false
+}
+
+// tlsServerName reads the server name from a TLS ClientHello, or "".
+func tlsServerName(d []byte) string {
+	// record header (5), handshake type 1 (ClientHello), length (3), version (2), random (32)
+	if len(d) < 44 || d[0] != 0x16 || d[5] != 1 {
+		return ""
+	}
+	i := 43
+	i += 1 + int(d[i]) // session id
+	if i+2 > len(d) {
+		return ""
+	}
+	i += 2 + (int(d[i])<<8 | int(d[i+1])) // cipher suites
+	if i >= len(d) {
+		return ""
+	}
+	i += 1 + int(d[i]) // compression methods
+	if i+2 > len(d) {
+		return ""
+	}
+	end := i + 2 + (int(d[i])<<8 | int(d[i+1]))
+	i += 2
+	for i+4 <= end && i+4 <= len(d) {
+		typ, n := int(d[i])<<8|int(d[i+1]), int(d[i+2])<<8|int(d[i+3])
+		if typ == 0 && i+9 <= len(d) { // server_name: list length (2), name type (1), name length (2), name
+			ln := int(d[i+7])<<8 | int(d[i+8])
+			if i+9+ln <= len(d) {
+				return string(d[i+9 : i+9+ln])
+			}
+			return ""
+		}
+		i += 4 + n
+	}
+	return ""
+}
+
+var httpMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
+// httpRequest reads a plain-HTTP request's method, Host header and path.
+func httpRequest(d []byte) (method, host, path string, ok bool) {
+	head, _, _ := strings.Cut(string(d), "\r\n\r\n")
+	lines := strings.Split(head, "\r\n")
+	parts := strings.Fields(lines[0])
+	if len(parts) != 3 || !strings.HasPrefix(parts[2], "HTTP/") {
+		return "", "", "", false
+	}
+	for _, m := range httpMethods {
+		if parts[0] == m {
+			for _, l := range lines[1:] {
+				if k, v, found := strings.Cut(l, ":"); found && strings.EqualFold(k, "host") {
+					host = strings.TrimSpace(v)
+				}
+			}
+			return m, host, parts[1], host != ""
+		}
+	}
+	return "", "", "", false
+}
+
+// ---- Android: the kernel's socket table ----
+
+// netAndroid polls /proc/net for the app's sockets (adb's shell user may read them, with each
+// socket's owning uid) and reports each new connection once.
+func netAndroid(ctx context.Context, s Spec, emit func(event.Net)) error {
+	if s.App.Android == "" {
+		return fmt.Errorf("app %q has no android package in saw.json", s.App.Name)
+	}
+	uid, err := packageUID(ctx, s.Device.ID, s.App.Android)
+	if err != nil {
+		return err
+	}
+	const script = "while true; do echo SAW-TCP; cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; " +
+		"echo SAW-UDP; cat /proc/net/udp /proc/net/udp6 2>/dev/null; echo SAW-END; sleep 0.25; done"
+	open, now := map[string]bool{}, map[string]bool{}
+	proto := ""
+	names := newReverseDNS()
+	s.started()
+	return run.Lines(ctx, func(line string) {
+		switch strings.TrimSpace(line) {
+		case "SAW-TCP":
+			proto = "tcp"
+			return
+		case "SAW-UDP":
+			proto = "udp"
+			return
+		case "SAW-END":
+			open, now = now, map[string]bool{}
+			return
+		}
+		c, ok := parseProcNet(line, proto)
+		if !ok || c.uid != uid {
+			return
+		}
+		key := proto + " " + c.local + " " + c.remote
+		if now[key] {
+			return
+		}
+		now[key] = true
+		if open[key] { // still open since the last look
+			return
+		}
+		kind := proto
+		if proto == "udp" && c.port == 53 {
+			kind = "dns" // the lookup itself isn't visible, only that one was made
+		}
+		emit(event.Net{Time: time.Now(), Platform: "android", Device: s.Device.Name, Kind: kind,
+			IP: c.ip, Port: c.port, Host: names.lookup(ctx, c.ip)})
+	}, "adb", "-s", s.Device.ID, "shell", script)
+}
+
+type procConn struct {
+	local, remote string
+	ip            string
+	port, uid     int
+}
+
+// parseProcNet reads one /proc/net/{tcp,tcp6,udp,udp6} row, keeping connected sockets to
+// non-loopback addresses:
+//
+//	0: 0000000000000000FFFF00000E00A8C0:B7E0 0000000000000000FFFF00000876BE23:01BB 01 … 10710 …
+func parseProcNet(line, proto string) (procConn, bool) {
+	f := strings.Fields(line)
+	if len(f) < 8 || !strings.HasSuffix(f[0], ":") {
+		return procConn{}, false
+	}
+	state := f[3]
+	if proto == "tcp" && state != "01" && state != "02" { // established, SYN sent
+		return procConn{}, false
+	}
+	addr, portHex, ok := strings.Cut(f[2], ":")
+	if !ok {
+		return procConn{}, false
+	}
+	port, err1 := strconv.ParseUint(portHex, 16, 16)
+	uid, err2 := strconv.Atoi(f[7])
+	ip := procIP(addr)
+	if err1 != nil || err2 != nil || ip == nil || port == 0 || ip.IsLoopback() || ip.IsUnspecified() {
+		return procConn{}, false
+	}
+	return procConn{local: f[1], remote: f[2], ip: ip.String(), port: int(port), uid: uid}, true
+}
+
+// procIP decodes /proc/net's addresses: 32-bit words, each in little-endian order.
+func procIP(h string) net.IP {
+	b, err := hex.DecodeString(h)
+	if err != nil || (len(b) != 4 && len(b) != 16) {
+		return nil
+	}
+	for i := 0; i < len(b); i += 4 {
+		b[i], b[i+1], b[i+2], b[i+3] = b[i+3], b[i+2], b[i+1], b[i]
+	}
+	ip := net.IP(b)
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip
+}
+
+// lookupAddr is the reverse DNS lookup; tests replace it.
+var lookupAddr = net.DefaultResolver.LookupAddr
+
+// reverseDNS names addresses where it can, quickly, remembering answers.
+type reverseDNS struct{ cache map[string]string }
+
+func newReverseDNS() *reverseDNS { return &reverseDNS{cache: map[string]string{}} }
+
+func (r *reverseDNS) lookup(ctx context.Context, ip string) string {
+	if name, ok := r.cache[ip]; ok {
+		return name
+	}
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer cancel()
+	name := ""
+	if names, err := lookupAddr(ctx, ip); err == nil && len(names) > 0 {
+		name = strings.TrimSuffix(names[0], ".")
+	}
+	r.cache[ip] = name
+	return name
+}

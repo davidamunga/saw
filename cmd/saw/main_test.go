@@ -249,3 +249,26 @@ func TestHelpers(t *testing.T) {
 		t.Error("empty version")
 	}
 }
+
+func TestNet(t *testing.T) {
+	rules := androidRules(t)[:3]
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: "SAW-TCP\n   1: 0E00A8C0:B7E0 097100CB:01BB 01 0 0 0 10710 0 0\nSAW-UDP\nSAW-END\n"})
+	runtest.Install(t, rules...)
+	t.Chdir(t.TempDir())
+	out, errOut, err := saw(t, "", "net", "--app", "com.example.app")
+	if err != nil || !strings.Contains(out, "TCP  203.0.113.9:443") || !strings.Contains(errOut, "network on Pixel 8") {
+		t.Errorf("got %q %q %v", out, errOut, err)
+	}
+	out, _, _ = saw(t, "", "net", "--app", "com.example.app", "--json")
+	if !strings.Contains(out, `"kind":"tcp"`) || !strings.Contains(out, `"ip":"203.0.113.9"`) {
+		t.Errorf("got %q", out)
+	}
+	for _, args := range [][]string{{"net", "--platform", "web"}, {"net"}, {"net", "--app", "com.x", "stray"}} {
+		if _, _, err := saw(t, "", args...); !isUsage(err) {
+			t.Errorf("%v: want a usage error, got %v", args, err)
+		}
+	}
+	if _, _, err := saw(t, "", "net", "--app", "com.x", "--platform", "ios"); err == nil {
+		t.Error("no iOS device should fail")
+	}
+}
