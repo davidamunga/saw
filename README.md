@@ -14,18 +14,9 @@
 Stream a mobile app's logs from any Android device or emulator, iOS simulator, or iPhone/iPad, with
 one command.
 
-```sh
-saw stream --app com.example.app
-```
-
-```
-saw: com.example.app on Pixel 8 Android 14 (Ctrl-C to stop)
-09:41:02.114 I MainActivity onCreate
-09:41:02.380 D OkHttp       --> GET https://api.example.com/v1/orders
-09:41:02.918 D OkHttp       <-- 200 https://api.example.com/v1/orders (538ms)
-09:41:03.002 W SyncWorker   retrying upload (attempt 2 of 5)
-09:41:03.441 E Checkout     payment failed: card declined
-```
+<p align="center">
+  <img alt="saw streaming a demo app's logs from an Android phone" src="assets/saw-demo.gif" width="800">
+</p>
 
 - **One command for every device.** Android and iOS, emulators, simulators and physical devices.
 - **Your app's lines only.** No setup and no filters to write: saw keeps your app's own logs and
