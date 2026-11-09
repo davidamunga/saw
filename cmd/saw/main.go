@@ -187,7 +187,6 @@ func streamCmd(ctx context.Context, args []string) error {
 	if *asJSON {
 		printer = output.NewJSON(os.Stdout)
 	}
-	fmt.Fprintf(os.Stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
 
 	warnedPrivate := false
 	emit := func(e event.Event) {
@@ -203,6 +202,9 @@ func streamCmd(ctx context.Context, args []string) error {
 	return source.Stream(ctx, source.Spec{
 		Device: dev, App: app, Subsystem: cfg.Subsystem(app),
 		Areas: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all,
+		OnStart: func() {
+			fmt.Fprintf(os.Stderr, "saw: %s on %s %s (Ctrl-C to stop)\n", app.Name, dev.Name, dev.OS)
+		},
 	}, emit)
 }
 

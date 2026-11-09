@@ -4,7 +4,6 @@ package source
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/davidamunga/saw/internal/config"
@@ -21,6 +20,23 @@ type Spec struct {
 	Chosen    bool                // Areas were picked with --area, not just every configured area
 	TagFor    func(string) string // Android: area → logcat tag; nil when the project has none
 	All       bool                // everything the app's process logs, not only its own lines
+	OnStart   func()              // called once the app is found, just before lines start
+}
+
+func (s Spec) started() {
+	if s.OnStart != nil {
+		s.OnStart()
+	}
+}
+
+// containsFold reports whether list holds v, ignoring case.
+func containsFold(list []string, v string) bool {
+	for _, x := range list {
+		if strings.EqualFold(x, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stream sends each of the app's log lines to emit until ctx ends.
@@ -59,7 +75,7 @@ func (s Spec) keepIOS(e event.Event) bool {
 	if s.All {
 		return true
 	}
-	if s.Chosen && !slices.Contains(s.Areas, e.Category) {
+	if s.Chosen && !containsFold(s.Areas, e.Category) {
 		return false
 	}
 	if s.Subsystem != "" {

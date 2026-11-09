@@ -18,9 +18,6 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 	if s.App.Android == "" {
 		return fmt.Errorf("app %q has no android package in saw.json", s.App.Name)
 	}
-	if s.Chosen && s.TagFor == nil {
-		return fmt.Errorf("--area on Android needs android.tag in saw.json")
-	}
 	serial := s.Device.ID
 	uid, err := packageUID(ctx, serial, s.App.Android)
 	if err != nil {
@@ -43,9 +40,13 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 		args = append(args, "AndroidRuntime:E", "*:S") // keep crashes
 	}
 
+	s.started()
 	return run.Lines(ctx, func(line string) {
 		e, lineUID, ok := ParseLogcat(line)
 		if !ok || !uids[lineUID] {
+			return
+		}
+		if !s.keepAndroidTag(e.Tag) {
 			return
 		}
 		e.Device = s.Device.Name
@@ -53,6 +54,16 @@ func streamAndroid(ctx context.Context, s Spec, emit func(event.Event)) error {
 		e.Area = tagArea[e.Tag]
 		emit(e)
 	}, "adb", args...)
+}
+
+// keepAndroidTag applies --area when the project has no tag convention (no android.tag):
+// the areas are then logcat tags themselves, matched in any case. Crashes always show.
+// With a convention, logcat already filtered by tag.
+func (s Spec) keepAndroidTag(tag string) bool {
+	if !s.Chosen || s.TagFor != nil {
+		return true
+	}
+	return tag == "AndroidRuntime" || containsFold(s.Areas, tag)
 }
 
 func packageUID(ctx context.Context, serial, pkg string) (int, error) {

@@ -151,3 +151,23 @@ func TestKeepIOSWithoutConvention(t *testing.T) {
 		t.Error("subsystem filter")
 	}
 }
+
+func TestAreasWithoutConvention(t *testing.T) {
+	// No saw.json: --area names logcat tags (Android) or categories (iOS), in any case.
+	s := Spec{Areas: []string{"okhttp", "Sync"}, Chosen: true}
+	for tag, want := range map[string]bool{"OkHttp": true, "sync": true, "AndroidRuntime": true, "Choreographer": false} {
+		if got := s.keepAndroidTag(tag); got != want {
+			t.Errorf("tag %s: got %v", tag, got)
+		}
+	}
+	if !s.keepIOS(event.Event{Category: "SYNC", Sender: "/x/MyApp.app/MyApp"}) {
+		t.Error("iOS category should match in any case")
+	}
+	if !(Spec{}).keepAndroidTag("Anything") {
+		t.Error("no --area keeps every tag")
+	}
+	conv := Spec{Areas: []string{"api"}, Chosen: true, TagFor: func(a string) string { return "My" + a }}
+	if !conv.keepAndroidTag("Whatever") {
+		t.Error("with a tag convention, logcat filters, not this check")
+	}
+}

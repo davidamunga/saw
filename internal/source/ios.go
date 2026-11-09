@@ -30,6 +30,7 @@ func streamSimulator(ctx context.Context, s Spec, emit func(event.Event)) error 
 		}
 	}
 	predicate := simPredicate(s, process)
+	s.started()
 	return run.Lines(ctx, func(line string) {
 		e, ok := ParseUnifiedLog([]byte(line))
 		if !ok {
@@ -118,6 +119,7 @@ func streamIOSDevice(ctx context.Context, s Spec, emit func(event.Event)) error 
 			return fmt.Errorf("%s is not installed on %s", s.App.IOS, s.Device)
 		}
 	}
+	s.started()
 	return run.Lines(ctx, func(line string) {
 		e, ok := ParseDeviceLog([]byte(line))
 		if !ok {
