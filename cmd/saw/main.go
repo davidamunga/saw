@@ -265,12 +265,35 @@ func streamCmd(ctx context.Context, args []string) error {
 		})
 	}
 	return w.run(ctx, app.Name, func(ctx context.Context, dev device.Device) error {
+		// Crash reports show up in the stream too, since the app's own log misses native
+		// crashes, ANRs and iOS crashes.
+		ctx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		defer func() { stop(); <-done }()
+		start := w.since
+		if start.IsZero() {
+			start = now()
+		}
+		go func() {
+			defer close(done)
+			crash.Watch(ctx, dev, app, start, func(r crash.Report) { emit(crashEvent(r)) })
+		}()
 		return source.Stream(ctx, source.Spec{
 			Device: dev, App: app, Subsystem: cfg.Subsystem(app),
 			Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all, Since: w.since,
 			OnStart: w.onStart(app.Name, dev), OnLive: w.onLive(dev),
 		}, emit)
 	})
+}
+
+// crashEvent is a crash report as one line of the stream, pointing to the full report.
+func crashEvent(r crash.Report) event.Event {
+	what := map[string]string{"crash": "crash", "native": "native crash", "anr": "not responding (ANR)"}[r.Kind]
+	if what == "" {
+		what = r.Kind
+	}
+	return event.Event{Time: r.Time, Platform: r.Platform, Device: r.Device, Process: r.Process, Level: event.Fatal,
+		Tag: "CRASH", Message: fmt.Sprintf("%s: %s (saw crashes --last for the report)", what, r.Summary)}
 }
 
 // hasTag reports whether a line's tag, category or scope is one of tags.
