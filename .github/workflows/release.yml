@@ -13,15 +13,32 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # GoReleaser builds the changelog from history
+          fetch-depth: 0 # GoReleaser reads the tags
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false # no dependencies, so nothing to cache
+      # The release notes are this version's section of CHANGELOG.md (see CONTRIBUTING.md).
+      - name: Check the version and get its notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$(cat version.txt)" != "$version" ]; then
+            echo "::error::The tag is v$version but version.txt says $(cat version.txt). Run changeset version first."
+            exit 1
+          fi
+          awk -v v="$version" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # A token that can push to davidamunga/homebrew-tap (repo secret).
