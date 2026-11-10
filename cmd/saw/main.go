@@ -32,6 +32,9 @@ import (
 
 var version = "dev" // set at release time
 
+// now is the clock --since counts back from; tests set it.
+var now = time.Now
+
 // Where commands read and write; tests swap them.
 var (
 	stdout io.Writer = os.Stdout
@@ -221,7 +224,7 @@ func streamCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return usageError{err}
 	}
-	w, err := wf.parse(time.Now())
+	w, err := wf.parse(now())
 	if err != nil {
 		return err
 	}
@@ -327,7 +330,7 @@ func netCmd(ctx context.Context, args []string) error {
 	if n := countTrue(*full, *curl, *asJSON); n > 1 {
 		return usageError{errors.New("pick one of --full, --curl and --json")}
 	}
-	w, err := wf.parse(time.Now())
+	w, err := wf.parse(now())
 	if err != nil {
 		return err
 	}
@@ -777,7 +780,7 @@ func crashesCmd(ctx context.Context, args []string) error {
 	if *last && *asJSON {
 		return usageError{errors.New("pick one of --last and --json")}
 	}
-	since, err := parseSince(*sinceText, time.Now())
+	since, err := parseSince(*sinceText, now())
 	if err != nil {
 		return usageError{err}
 	}

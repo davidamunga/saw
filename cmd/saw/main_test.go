@@ -460,7 +460,8 @@ func TestNetHAR(t *testing.T) {
 	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:02.000 10710 1 7 D OkHttp: --> GET https://api.example.com/v1/orders\n" +
 		"2026-11-09 11:50:02.300 10710 1 7 D OkHttp: <-- 200 https://api.example.com/v1/orders (300ms)\n" +
 		"2026-11-09 11:50:02.300 10710 1 7 D OkHttp: <-- END HTTP\n"})
-	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: "SAW-TCP\nSAW-UDP\nSAW-END\n"})
+	// The poller waits, so the stream ends when logcat's lines are all read.
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: "SAW-TCP\nSAW-UDP\nSAW-END\n", Hang: true})
 	runtest.Install(t, rules...)
 	t.Chdir(t.TempDir())
 	_, errOut, err := saw(t, "", "net", "--app", "com.example.app", "--har", "s.har")
@@ -500,8 +501,10 @@ func TestCrashes(t *testing.T) {
 		t.Errorf("--json: %q", out)
 	}
 	// --since leaves out older reports; with none left, saw says so.
-	since := time.Since(time.Date(2026, 11, 10, 15, 2, 10, 0, time.Local)).Round(time.Second)
-	out, _, _ = saw(t, "", "crashes", "--app", "com.example.app", "--since", since.String())
+	oldNow := now
+	now = func() time.Time { return time.Date(2026, 11, 10, 16, 0, 0, 0, time.Local) }
+	t.Cleanup(func() { now = oldNow })
+	out, _, _ = saw(t, "", "crashes", "--app", "com.example.app", "--since", "15:02:10")
 	if strings.Count(out, "\n") != 1 {
 		t.Errorf("--since: %q", out)
 	}
