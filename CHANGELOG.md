@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 
+## 0.8.0 (2026-11-10)
+### Minor Changes
+- `saw net` reads two more request log formats, both common on iOS: Alamofire's `response.debugDescription` and Moya's `NetworkLoggerPlugin`, when the app sends them to the unified log (`NSLog`, `os_log` or `Logger`).
+- `saw stream` and `saw net` reconnect when a device drops (unplugged, Wi-Fi dropped, simulator shut down): saw waits for it and carries on, starting with the lines from while it was away on Android and simulators.
+- `saw stream` shows new crash reports as they appear, as a red `CRASH` line: native crashes and ANRs on Android, and crashes on iOS, which the app's own log doesn't show.
+
+### Patch Changes
+- iOS lines logged with `NSLog` now show in `saw stream` (without a Logger subsystem in saw.json) and count for `saw net`. They were dropped, because `NSLog` logs from Foundation rather than from the app's own code.
+
 ## 0.7.1 (2026-11-10)
 ### Patch Changes
 - Publishes 0.7.0's changes (0.7.0 was tagged but its release build failed). Tests no longer depend on the clock or time zone.
