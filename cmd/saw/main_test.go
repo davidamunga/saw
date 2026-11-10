@@ -453,3 +453,81 @@ func TestNetFilters(t *testing.T) {
 		t.Errorf("connections should be quieted per device: %v", got)
 	}
 }
+
+func TestNetHAR(t *testing.T) {
+	rules := androidRules(t)[:3]
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat -v threadtime -v year -v uid -d"})
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 logcat", Stdout: "2026-11-09 11:50:02.000 10710 1 7 D OkHttp: --> GET https://api.example.com/v1/orders\n" +
+		"2026-11-09 11:50:02.300 10710 1 7 D OkHttp: <-- 200 https://api.example.com/v1/orders (300ms)\n" +
+		"2026-11-09 11:50:02.300 10710 1 7 D OkHttp: <-- END HTTP\n"})
+	rules = append(rules, runtest.Rule{Cmd: "adb -s S1 shell while", Stdout: "SAW-TCP\nSAW-UDP\nSAW-END\n"})
+	runtest.Install(t, rules...)
+	t.Chdir(t.TempDir())
+	_, errOut, err := saw(t, "", "net", "--app", "com.example.app", "--har", "s.har")
+	data, _ := os.ReadFile("s.har")
+	if err != nil || !strings.Contains(errOut, "saw: saved 1 request to s.har") || !strings.Contains(string(data), `"url": "https://api.example.com/v1/orders"`) {
+		t.Errorf("got %q %v\n%s", errOut, err, data)
+	}
+	if _, _, err := saw(t, "", "net", "--app", "com.example.app", "--har", "missing/s.har"); err == nil {
+		t.Error("want an error for a folder that doesn't exist")
+	}
+}
+
+func crashRules(t *testing.T) []runtest.Rule {
+	return []runtest.Rule{
+		{Cmd: "adb -s S1 shell dumpsys dropbox --print data_app_crash", Stdout: fixture(t, "dropbox-crash.txt")},
+		{Cmd: "adb -s S1 shell dumpsys dropbox --print data_app_native_crash", Stdout: fixture(t, "dropbox-native.txt")},
+		{Cmd: "adb -s S1 shell dumpsys dropbox --print data_app_anr", Stdout: fixture(t, "dropbox-anr.txt")},
+	}
+}
+
+func TestCrashes(t *testing.T) {
+	runtest.Install(t, append(crashRules(t), androidRules(t)...)...)
+	t.Chdir(t.TempDir())
+	out, errOut, err := saw(t, "", "crashes", "--app", "com.example.app")
+	want := "2026-11-10 15:02:12  native  SIGSEGV in libc.so (__epoll_pwait+8)\n" +
+		"2026-11-10 15:02:07  crash   android.app.RemoteServiceException: shell-induced crash\n" +
+		"2026-11-09 14:20:05  anr     Input dispatching timed out: waited 5002ms for MotionEvent\n"
+	if err != nil || out != want || !strings.Contains(errOut, "saw: 3 reports for com.example.app on Pixel 8") {
+		t.Errorf("got:\n%s%q %v", out, errOut, err)
+	}
+	out, _, _ = saw(t, "", "crashes", "--app", "com.example.app", "--last")
+	if !strings.HasPrefix(out, "# 2026-11-10 15:02:12  Pixel 8  native  SIGSEGV") || !strings.Contains(out, "backtrace:") {
+		t.Errorf("--last: %q", out)
+	}
+	out, _, _ = saw(t, "", "crashes", "--app", "com.example.app", "--json")
+	if strings.Count(out, "\n") != 3 || !strings.Contains(out, `"kind":"native"`) || !strings.Contains(out, `"report":"`) {
+		t.Errorf("--json: %q", out)
+	}
+	// --since leaves out older reports; with none left, saw says so.
+	since := time.Since(time.Date(2026, 11, 10, 15, 2, 10, 0, time.Local)).Round(time.Second)
+	out, _, _ = saw(t, "", "crashes", "--app", "com.example.app", "--since", since.String())
+	if strings.Count(out, "\n") != 1 {
+		t.Errorf("--since: %q", out)
+	}
+	out, errOut, err = saw(t, "", "crashes", "--app", "com.example.app", "--since", "1s")
+	if err != nil || out != "" || !strings.Contains(errOut, "no crashes for com.example.app on Pixel 8") {
+		t.Errorf("none: %q %q %v", out, errOut, err)
+	}
+	for _, args := range [][]string{{"--last", "--json"}, {"--since", "soon"}, {"extra"}} {
+		if _, _, err := saw(t, "", append([]string{"crashes", "--app", "com.example.app"}, args...)...); !isUsage(err) {
+			t.Errorf("%v: want a usage error, got %v", args, err)
+		}
+	}
+}
+
+func TestCrashesSeveralDevices(t *testing.T) {
+	twoPhones(t, append(crashRules(t), runtest.Rule{Cmd: "adb -s S2 shell dumpsys", Stderr: "offline", Exit: 1})...)
+	out, errOut, err := saw(t, "", "crashes", "--app", "com.example.app", "--device", "all")
+	if err != nil || !strings.HasPrefix(out, "2026-11-10 15:02:12  Pixel 8  native") || !strings.Contains(errOut, "saw: Pixel 9: ") {
+		t.Errorf("got %q %q %v", out, errOut, err)
+	}
+	twoPhones(t, runtest.Rule{Cmd: "adb -s S1 shell dumpsys", Exit: 1}, runtest.Rule{Cmd: "adb -s S2 shell dumpsys", Exit: 1})
+	if _, _, err := saw(t, "", "crashes", "--app", "com.example.app", "--device", "all"); err == nil || !strings.Contains(err.Error(), "no device could be read") {
+		t.Errorf("got %v", err)
+	}
+	twoPhones(t, runtest.Rule{Cmd: "adb -s S1 shell dumpsys", Stderr: "offline", Exit: 1})
+	if _, _, err := saw(t, "", "crashes", "--app", "com.example.app", "--device", "S1"); err == nil || !strings.Contains(err.Error(), "offline") {
+		t.Errorf("one device: got %v", err)
+	}
+}

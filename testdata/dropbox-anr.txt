@@ -1,0 +1,43 @@
+Drop box contents: 2 entries
+Searching for: data_app_anr
+
+========================================
+2026-11-09 14:16:29 data_app_anr (compressed text, 900 bytes)
+Process: com.example.other
+PID: 100
+Subject: Broadcast of Intent { act=x }
+
+----- pid 100 at 2026-11-09 14:16:22.278812024+0300 -----
+----- end 100 -----
+
+========================================
+2026-11-09 14:20:05 data_app_anr (compressed text, 2400 bytes)
+Process: com.example.app
+PID: 22138
+UID: 10038
+Package: com.example.app v1 (1.0)
+Foreground: Yes
+Activity: com.example.app/.SyncActivity
+
+----- Output from /proc/pressure/memory -----
+some avg10=0.00 avg60=0.00 avg300=0.00 total=1258057958
+----- End output from /proc/pressure/memory -----
+
+CPU usage from 0ms to 7299ms later:
+  22% 1099/system_server: 11% user + 10% kernel
+
+Subject: Input dispatching timed out (c69f291 com.example.app/.SyncActivity (server) is not responding. Waited 5002ms for MotionEvent)
+
+----- pid 22138 at 2026-11-09 14:20:00.278812024+0300 -----
+Cmd line: com.example.app
+
+"main" prio=5 tid=1 Sleeping
+  at java.lang.Thread.sleep(Native method)
+  at com.example.app.SyncActivity.onCreate(SyncActivity.kt:42)
+
+----- end 22138 -----
+
+----- pid 1099 at 2026-11-09 14:20:00.699765601+0300 -----
+Cmd line: system_server
+"main" prio=5 tid=1 Native
+----- end 1099 -----

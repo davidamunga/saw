@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/davidamunga/saw/internal/config"
+	"github.com/davidamunga/saw/internal/crash"
 	"github.com/davidamunga/saw/internal/device"
 	"github.com/davidamunga/saw/internal/doctor"
 	"github.com/davidamunga/saw/internal/event"
@@ -82,7 +83,9 @@ Usage:
   saw devices [--all] [--json]
   saw stream  [--app <name|id>] [--scope a,b] [--level <level>] [--exclude-tag a,b] [--all] [--json]
               [watch flags]
-  saw net     [--app <name|id>] [--full | --curl | --json] [--connections] [watch flags]
+  saw net     [--app <name|id>] [--full | --curl | --json] [--har <file>] [--connections] [watch flags]
+  saw crashes [--app <name|id>] [--device <id|name|all>] [--platform android|ios] [--since <when>]
+              [--last | --json]
   saw doctor
   saw version
 
@@ -128,6 +131,8 @@ func runCLI(ctx context.Context, args []string) error {
 		return streamCmd(ctx, args[1:])
 	case "net":
 		return netCmd(ctx, args[1:])
+	case "crashes":
+		return crashesCmd(ctx, args[1:])
 	case "doctor":
 		return doctorCmd(ctx, args[1:])
 	case "version", "--version":
@@ -315,6 +320,7 @@ func netCmd(ctx context.Context, args []string) error {
 	curl := fs.Bool("curl", false, "print requests the app logs as curl commands")
 	asJSON := fs.Bool("json", false, "print one JSON event per line")
 	connections := fs.Bool("connections", false, "keep showing connections after the app logs its first request")
+	harPath := fs.String("har", "", "also save the requests to this HAR file, for Chrome DevTools, Proxyman or Charles")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -345,13 +351,42 @@ func netCmd(ctx context.Context, args []string) error {
 	if !*connections && !*asJSON {
 		printer = &quietConnections{next: printer}
 	}
-	emit := func(n event.Net) { w.emit(n.Time, netText(n), func() { printer.Print(n) }) }
-	return w.run(ctx, app.Name+" network", func(ctx context.Context, dev device.Device) error {
+	var har *output.HAR
+	var harErr error
+	if *harPath != "" {
+		har = output.NewHAR(*harPath, versionString())
+		if err := har.Write(); err != nil { // fail now, not after the session
+			return err
+		}
+	}
+	emit := func(n event.Net) {
+		w.emit(n.Time, netText(n), func() {
+			printer.Print(n)
+			if har != nil && harErr == nil {
+				_, harErr = har.Add(n)
+			}
+		})
+	}
+	err = w.run(ctx, app.Name+" network", func(ctx context.Context, dev device.Device) error {
 		return source.StreamNet(ctx, source.Spec{
 			Device: dev, App: app, Subsystem: cfg.Subsystem(app), Since: w.since,
 			OnStart: w.onStart(app.Name+" network", dev), OnLive: w.onLive(dev),
 		}, emit)
 	})
+	if har != nil {
+		if harErr != nil {
+			return fmt.Errorf("saving %s: %w", *harPath, harErr)
+		}
+		fmt.Fprintf(stderr, "saw: saved %s to %s\n", plural(har.Count(), "request"), *harPath)
+	}
+	return err
+}
+
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
 }
 
 // netText is what --grep and --until match in a network event.
@@ -725,4 +760,116 @@ func pickDevices(ctx context.Context, query, platform string, app config.App) ([
 		}
 	}
 	return picked, nil
+}
+
+// crashesCmd lists the app's crash reports, newest first, or prints the newest in full.
+func crashesCmd(ctx context.Context, args []string) error {
+	fs, cfgPath := newFlags("crashes")
+	appName := fs.String("app", "", "app name from saw.json, or a package/bundle id")
+	deviceQuery := fs.String("device", "", "device id, id prefix or name; several with commas, or all")
+	platform := fs.String("platform", "", "android or ios")
+	sinceText := fs.String("since", "", "only crashes since: a duration (24h) or a clock time (09:40)")
+	last := fs.Bool("last", false, "print the newest crash report in full")
+	asJSON := fs.Bool("json", false, "print one JSON report per line, each in full")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if *last && *asJSON {
+		return usageError{errors.New("pick one of --last and --json")}
+	}
+	since, err := parseSince(*sinceText, time.Now())
+	if err != nil {
+		return usageError{err}
+	}
+	_, app, err := loadApp(*cfgPath, *appName, *platform)
+	if err != nil {
+		return err
+	}
+	devs, err := pickDevices(ctx, *deviceQuery, *platform, app)
+	if err != nil {
+		return err
+	}
+
+	var reports []crash.Report
+	failed := 0
+	for _, d := range devs {
+		rs, err := crash.List(ctx, d, app)
+		if err != nil {
+			if len(devs) == 1 {
+				return err
+			}
+			failed++
+			fmt.Fprintf(stderr, "saw: %s: %v\n", d.Name, err)
+		}
+		for _, r := range rs {
+			if since.IsZero() || !r.Time.Before(since) {
+				reports = append(reports, r)
+			}
+		}
+	}
+	if failed == len(devs) {
+		return errors.New("no device could be read")
+	}
+	sort.SliceStable(reports, func(i, j int) bool { return reports[i].Time.After(reports[j].Time) })
+
+	where := devs[0].Name
+	if len(devs) > 1 {
+		where = fmt.Sprintf("%d devices", len(devs))
+	}
+	if len(reports) == 0 {
+		fmt.Fprintf(stderr, "saw: no crashes for %s on %s\n", app.Name, where)
+		return nil
+	}
+	switch {
+	case *asJSON:
+		enc := json.NewEncoder(stdout)
+		for _, r := range reports {
+			if err := enc.Encode(r); err != nil {
+				return err
+			}
+		}
+	case *last:
+		r := reports[0]
+		fmt.Fprintf(stdout, "# %s  %s  %s  %s\n\n%s\n", r.Time.Format("2006-01-02 15:04:05"), r.Device, r.Kind, r.Summary, r.Text)
+		if r.File != "" {
+			fmt.Fprintf(stdout, "\n# %s\n", r.File)
+		}
+	default:
+		printCrashes(reports, len(devs) > 1, wantColor(stdout))
+		fmt.Fprintf(stderr, "saw: %s for %s on %s; --last prints the newest in full\n", plural(len(reports), "report"), app.Name, where)
+	}
+	return nil
+}
+
+func printCrashes(reports []crash.Report, showDevice, color bool) {
+	width := 0
+	if showDevice {
+		names := make([]string, len(reports))
+		for i, r := range reports {
+			names[i] = r.Device
+		}
+		width = output.DeviceWidth(names)
+	}
+	paint := func(code, s string) string {
+		if !color {
+			return s
+		}
+		return code + s + "\x1b[0m"
+	}
+	for _, r := range reports {
+		line := paint("\x1b[2m", r.Time.Format("2006-01-02 15:04:05")) + "  "
+		if width > 0 {
+			name := r.Device
+			if len(name) > width {
+				name = name[:width-1] + "~"
+			}
+			line += fmt.Sprintf("%-*s  ", width, name)
+		}
+		kindColor := "\x1b[31m"
+		if r.Kind == "anr" {
+			kindColor = "\x1b[33m"
+		}
+		line += paint(kindColor, fmt.Sprintf("%-6s", r.Kind)) + "  " + r.Summary
+		fmt.Fprintln(stdout, line)
+	}
 }

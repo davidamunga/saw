@@ -1,0 +1,47 @@
+Drop box contents: 293 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+Searching for: data_app_native_crash
+
+========================================
+2026-11-10 15:02:12 data_app_native_crash (text, 2434 bytes)
+Process: com.example.app
+PID: 11145
+UID: 10047
+Flags: 0x2088be46
+Package: com.example.app v1 (1.0)
+Foreground: No
+Process-Runtime: 584245946
+Build: example/phone/phone:12/SP1A.210812.016/1:user/release-keys
+Loading-Progress: 1.0
+
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Native Crash TIME: 177591502
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Build fingerprint: 'example/phone/phone:12/SP1A.210812.016/1:user/release-keys'
+Revision: '0'
+ABI: 'arm64'
+Timestamp: 2026-11-10 15:02:11.856460942+0300
+Process uptime: 0s
+Cmdline: com.example.app
+pid: 11145, tid: 11145, name: om.example.app  >>> com.example.app <<<
+uid: 10047
+signal 11 (SIGSEGV), code 0 (SI_USER from pid 11164, uid 10047), fault addr --------
+    x0  fffffffffffffffc  x1  0000007ff4efd400  x2  0000000000000010  x3  000000000000039f
+    x4  0000000000000000  x5  0000000000000008  x6  0000007ff4efd778  x7  ceb6417c6c3deca1
+    x8  0000000000000016  x9  0000000000005224  x10 0000007735195000  x11 00000000000000e0
+    x12 000000000000000c  x13 0000000081663d02  x14 0000007ff4efc200  x15 00000000ebad6a89
+    x16 000000792522cd40  x17 0000007927b2cb80  x18 00000079438e4000  x19 b4000077451a0510
+    x20 b4000077451a05b8  x21 000000000000039f  x22 000000000000039f  x23 b4000077451a0510
+    x24 0000000000000001  x25 0000007942691f80  x26 b4000076d51b4d00  x27 0000000000000000
+    x28 0000007ff4efd5e0  x29 0000007ff4efd510
+    lr  0000007925229534  sp  0000007ff4efd3c0  pc  0000007927b6b1e8  pst 0000000060001000
+backtrace:
+      #00 pc 000000000009e1e8  /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+8) (BuildId: 5d21548447ff2f9aab8359665aaabf4f)
+      #01 pc 0000000000016530  /system/lib64/libutils.so (android::Looper::pollInner(int)+180) (BuildId: 5c1a78044cfd3697ecacd3ecdae8405a)
+      #02 pc 0000000000016414  /system/lib64/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+112) (BuildId: 5c1a78044cfd3697ecacd3ecdae8405a)
+      #03 pc 000000000014ccec  /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, long, int)+44) (BuildId: a1242072e07b131162aa491a6b21dfe3)
+      #04 pc 00000000002c23a0  /apex/com.android.art/lib64/libart.so (art_quick_generic_jni_trampoline+144) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #05 pc 00000000020786ec  /memfd:jit-cache (deleted)
+

@@ -1,0 +1,152 @@
+{"app_name": "Example", "timestamp": "2026-11-10 15:03:34.00 +0300", "app_version": "1.0", "build_version": "1", "bundleID": "com.example.app", "bug_type": "309", "os_version": "macOS 27.2 (26B123)", "name": "Example"}
+{
+ "procPath": "/Users/USER/Library/Developer/CoreSimulator/Devices/SIM-1/data/Containers/Bundle/Application/A/Example.app/Example",
+ "procName": "Example",
+ "modelCode": "Mac16,8",
+ "exception": {
+  "codes": "0x0000000000000000, 0x0000000000000000",
+  "rawCodes": [
+   0,
+   0
+  ],
+  "type": "EXC_CRASH",
+  "signal": "SIGSEGV"
+ },
+ "termination": {
+  "namespace": "SIGNAL",
+  "indicator": "Segmentation fault: 11",
+  "byProc": "zsh"
+ },
+ "faultingThread": 0,
+ "threads": [
+  {
+   "queue": "com.apple.main-thread",
+   "frames": [
+    {
+     "imageOffset": 2908,
+     "symbol": "mach_msg2_trap",
+     "symbolLocation": 8,
+     "imageIndex": 2
+    },
+    {
+     "imageOffset": 73956,
+     "symbol": "mach_msg2_internal",
+     "symbolLocation": 72,
+     "imageIndex": 2
+    },
+    {
+     "imageOffset": 35928,
+     "symbol": "mach_msg_overwrite",
+     "symbolLocation": 484,
+     "imageIndex": 2
+    },
+    {
+     "imageOffset": 3804,
+     "symbol": "mach_msg",
+     "symbolLocation": 20,
+     "imageIndex": 2
+    },
+    {
+     "imageOffset": 631972,
+     "symbol": "__CFRunLoopServiceMachPort",
+     "symbolLocation": 156,
+     "imageIndex": 4
+    },
+    {
+     "imageOffset": 628340,
+     "symbol": "__CFRunLoopRun",
+     "symbolLocation": 1100,
+     "imageIndex": 4
+    },
+    {
+     "imageOffset": 607444,
+     "symbol": "_CFRunLoopRunSpecificWithOptions",
+     "symbolLocation": 496,
+     "imageIndex": 4
+    },
+    {
+     "imageOffset": 10668,
+     "symbol": "GSEventRunModal",
+     "symbolLocation": 116,
+     "imageIndex": 5
+    },
+    {
+     "imageOffset": 26510548,
+     "symbol": "UIApplicationMain",
+     "symbolLocation": 124,
+     "imageIndex": 6
+    },
+    {
+     "imageOffset": 8600396,
+     "symbol": "closure #1 in KitRendererCommon(_:)",
+     "symbolLocation": 164,
+     "imageIndex": 7
+    },
+    {
+     "imageOffset": 8600008,
+     "symbol": "runApp<A>(_:)",
+     "symbolLocation": 204,
+     "imageIndex": 7
+    },
+    {
+     "imageOffset": 6124436,
+     "symbol": "static App.main()",
+     "symbolLocation": 148,
+     "imageIndex": 7
+    },
+    {
+     "imageOffset": 63908,
+     "sourceFile": "/<compiler-generated>",
+     "symbol": "static ExampleApp.$main()",
+     "symbolLocation": 40,
+     "imageIndex": 1
+    },
+    {
+     "imageOffset": 63976,
+     "sourceFile": "ExampleApp.swift",
+     "symbol": "__debug_main_executable_dylib_entry_point",
+     "symbolLocation": 12,
+     "imageIndex": 1
+    },
+    {
+     "imageOffset": 66516,
+     "symbol": "start_sim",
+     "symbolLocation": 20,
+     "imageIndex": 0
+    },
+    {
+     "imageOffset": 204156,
+     "symbol": "start",
+     "symbolLocation": 6652,
+     "imageIndex": 3
+    }
+   ]
+  }
+ ],
+ "usedImages": [
+  {
+   "name": "dyld_sim"
+  },
+  {
+   "name": "Example.debug.dylib"
+  },
+  {
+   "name": "libsystem_kernel.dylib"
+  },
+  {
+   "name": "dyld"
+  },
+  {
+   "name": "CoreFoundation"
+  },
+  {
+   "name": "GraphicsServices"
+  },
+  {
+   "name": "UIKitCore"
+  },
+  {
+   "name": "SwiftUI"
+  }
+ ]
+}

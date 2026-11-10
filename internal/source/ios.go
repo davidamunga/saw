@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davidamunga/saw/internal/config"
+	"github.com/davidamunga/saw/internal/device"
 	"github.com/davidamunga/saw/internal/event"
 	"github.com/davidamunga/saw/internal/run"
 )
@@ -257,4 +259,16 @@ func iosLevel(s string) event.Level {
 		return event.Fatal
 	}
 	return event.Info // info, default, notice
+}
+
+// AppProcess is the app's process name on an iOS simulator or device.
+func AppProcess(ctx context.Context, dev device.Device, app config.App) (string, error) {
+	s := Spec{Device: dev, App: app}
+	if err := s.checkIOS(); err != nil {
+		return "", err
+	}
+	if dev.Kind == "simulator" {
+		return simProcess(ctx, s)
+	}
+	return deviceProcess(ctx, s)
 }

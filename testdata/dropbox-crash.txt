@@ -1,0 +1,30 @@
+Drop box contents: 293 entries
+Max entries: 1000
+Low priority rate limit period: 2000 ms
+Low priority tags: {data_app_wtf, keymaster, system_server_wtf, system_app_strictmode, system_app_wtf, system_server_strictmode, data_app_strictmode, netstats}
+Searching for: data_app_crash
+
+========================================
+2026-11-10 15:02:07 data_app_crash (text, 954 bytes)
+Process: com.example.app
+PID: 11075
+UID: 10047
+Flags: 0x20a8be46
+Package: com.example.app v1 (1.0)
+Foreground: Yes
+Process-Runtime: 584244479
+Build: example/phone/phone:12/SP1A.210812.016/1:user/release-keys
+Loading-Progress: 1.0
+
+android.app.RemoteServiceException: shell-induced crash
+	at android.app.ActivityThread.throwRemoteServiceException(ActivityThread.java:1968)
+	at android.app.ActivityThread.access$2700(ActivityThread.java:268)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2190)
+	at android.os.Handler.dispatchMessage(Handler.java:106)
+	at android.os.Looper.loopOnce(Looper.java:201)
+	at android.os.Looper.loop(Looper.java:288)
+	at android.app.ActivityThread.main(ActivityThread.java:7941)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:553)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1003)
+

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +38,9 @@ type Rule struct {
 	Stdout string
 	Stderr string
 	Exit   int
-	Hang   bool // after printing, wait to be killed (for streams cancelled by ctx)
-	Deaf   bool // with Hang: ignore interrupts, so only a kill stops it
+	Hang   bool   // after printing, wait to be killed (for streams cancelled by ctx)
+	Deaf   bool   // with Hang: ignore interrupts, so only a kill stops it
+	Copy   string // a file to copy into the folder named by the command's last argument
 }
 
 // Main runs the tests, or, when the binary was started as a fake tool, acts as that tool.
@@ -58,6 +60,16 @@ func fake(rulesJSON string, args []string) int {
 	line := strings.Join(args, " ")
 	for _, r := range rules {
 		if line == r.Cmd || strings.HasPrefix(line, r.Cmd+" ") {
+			if r.Copy != "" {
+				data, err := os.ReadFile(r.Copy)
+				if err == nil {
+					err = os.WriteFile(filepath.Join(args[len(args)-1], filepath.Base(r.Copy)), data, 0o644)
+				}
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "runtest:", err)
+					return 125
+				}
+			}
 			fmt.Fprint(os.Stdout, r.Stdout)
 			fmt.Fprint(os.Stderr, r.Stderr)
 			if r.Deaf {
