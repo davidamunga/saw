@@ -195,6 +195,21 @@ func TestStreamAmbiguousDevice(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "S1") || !strings.Contains(err.Error(), "S2") {
 		t.Errorf("got %v", err)
 	}
+	// Nor from /dev/null, as agents and scripts often run saw: it's a character device, but no
+	// terminal, and nobody can answer.
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	var out, errOut bytes.Buffer
+	oldOut, oldErr, oldIn := stdout, stderr, stdin
+	stdout, stderr, stdin = &out, &errOut, null
+	defer func() { stdout, stderr, stdin = oldOut, oldErr, oldIn }()
+	err = runCLI(context.Background(), []string{"stream", "--app", "com.x"})
+	if err == nil || !strings.Contains(err.Error(), "pass --device") || strings.Contains(errOut.String(), "Which device?") {
+		t.Errorf("got %v, stderr %q", err, errOut.String())
+	}
 }
 
 func TestChoose(t *testing.T) {

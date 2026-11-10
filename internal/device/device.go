@@ -188,8 +188,12 @@ type AmbiguousError struct{ Candidates []Device }
 func (e *AmbiguousError) Error() string {
 	var b strings.Builder
 	b.WriteString("more than one device; pass --device with one of:")
+	width := 0
 	for _, d := range e.Candidates {
-		fmt.Fprintf(&b, "\n  %-24s %s", d.ID, d.Name)
+		width = max(width, len(d.ID))
+	}
+	for _, d := range e.Candidates {
+		fmt.Fprintf(&b, "\n  %-*s  %s", width, d.ID, d.Name)
 	}
 	return b.String()
 }
