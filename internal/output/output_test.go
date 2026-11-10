@@ -68,6 +68,14 @@ func TestTerminalChecks(t *testing.T) {
 	if IsTerminal(f) || WantColor(f) {
 		t.Error("a file is not a terminal")
 	}
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	if IsTerminal(null) || IsTerminal(nil) {
+		t.Error("/dev/null is a character device, but not a terminal")
+	}
 }
 
 func TestDeviceColumn(t *testing.T) {

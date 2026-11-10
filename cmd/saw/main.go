@@ -327,7 +327,8 @@ func pickDevice(ctx context.Context, query, platform string) (device.Device, err
 	devs, errs := device.List(ctx, false)
 	dev, err := device.Pick(devs, query, platform)
 	var amb *device.AmbiguousError
-	if errors.As(err, &amb) && isTerminal(stdin) {
+	// Ask only someone who can answer: input from a terminal, and the question shown on one.
+	if errors.As(err, &amb) && isTerminal(stdin) && isTerminal(stderr) {
 		dev, err = choose(amb.Candidates)
 	}
 	if err != nil {

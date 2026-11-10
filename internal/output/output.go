@@ -108,10 +108,11 @@ func (p *Pretty) Print(e event.Event) {
 	}
 }
 
-// IsTerminal reports whether f is a terminal, and color is wanted (NO_COLOR unset).
+// IsTerminal reports whether f is a terminal. A character device isn't enough: /dev/null is
+// one too, and that's what an agent's or a script's stdin often is.
 func IsTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	return f != nil && isatty(f)
 }
 
+// WantColor reports whether f is a terminal and color is wanted (NO_COLOR unset).
 func WantColor(f *os.File) bool { return IsTerminal(f) && os.Getenv("NO_COLOR") == "" }
