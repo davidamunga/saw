@@ -11,8 +11,8 @@ import (
 )
 
 // httpLog assembles the HTTP requests an app logs itself into one "logged" event each, with
-// whatever headers and bodies its log level includes. It knows three formats, under any tag or
-// category:
+// whatever headers and bodies its log level includes. It knows these formats, under any tag or
+// category, and Alamofire's and Moya's on iOS (see httplog_swift.go):
 //
 // OkHttp-style: OkHttp's HttpLoggingInterceptor, and the many loggers that copy it.
 //
@@ -43,10 +43,11 @@ type httpLog struct {
 type logBlock struct {
 	n       event.Net
 	key     string // thread and tag
-	format  string // okhttp | ktor | dio
+	format  string // okhttp | ktor | dio | alamofire | moya
 	part    int    // partRequest or partResponse
 	section string // "", "headers" or "body"
 	lastLen int    // length of the last body line, to rejoin lines Android split at 4000 bytes
+	pending string // moya: the response header whose value is on the next line
 	seen    time.Time
 }
 
@@ -161,6 +162,15 @@ func (h *httpLog) line(e event.Event) bool {
 		start("ktor", partResponse, event.Net{Status: atoi(ktorRespRe.FindStringSubmatch(msg)[1])})
 		return true
 
+	// Alamofire and Moya (see httplog_swift.go)
+	case afReqRe.MatchString(msg):
+		r := afReqRe.FindStringSubmatch(msg)
+		start("alamofire", partRequest, event.Net{Method: r[1], URL: r[2]})
+		return true
+	case moyaRe.MatchString(msg):
+		h.moya(moyaRe.FindStringSubmatch(msg), e, key, now, start)
+		return true
+
 	// Dio
 	case msg == "*** Request ***":
 		start("dio", partRequest, event.Net{})
@@ -178,6 +188,10 @@ func (h *httpLog) line(e event.Event) bool {
 	}
 	cur.seen = now
 	switch cur.format {
+	case "alamofire":
+		h.alamofireLine(cur, msg)
+	case "moya":
+		h.moyaLine(cur, msg)
 	case "ktor":
 		switch {
 		case ktorMethodRe.MatchString(msg):
@@ -302,11 +316,18 @@ func (h *httpLog) take(url, key string) *logBlock {
 	return nil
 }
 
-// finish ends the block key is writing: a response is complete; a request keeps waiting.
+// finish ends the block key is writing: a response is complete; a request keeps waiting,
+// except Alamofire's, whose response is in the same message: the log cut it short.
 func (h *httpLog) finish(key string) {
 	b := h.current[key]
 	delete(h.current, key)
-	if b != nil && b.part == partResponse {
+	switch {
+	case b == nil:
+	case b.part == partResponse:
+		h.done(b)
+	case b.format == "alamofire":
+		h.unwait(b)
+		b.n.Error = "the rest was cut off in the log"
 		h.done(b)
 	}
 }

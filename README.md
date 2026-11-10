@@ -145,13 +145,22 @@ Proxyman, Charles or Insomnia, or attach it to a bug report:
 saw net --app com.example.app --for 1m --har session.har
 ```
 
-saw knows three logging formats:
+saw knows these logging formats:
 
 | Format | Used by | Looks like |
 |---|---|---|
 | OkHttp-style | OkHttp and Retrofit, and the many loggers that copy it | `--> POST https://…`, headers, body, `<-- 201 https://… (301ms)` |
 | Ktor | Ktor's `Logging` plugin | `REQUEST: https://…`, `METHOD: …`, `RESPONSE: 200 OK` |
 | Dio | Flutter's Dio `LogInterceptor` | `*** Request ***`, `uri: …`, `statusCode: …` |
+| Alamofire | `response.debugDescription`, logged by the app | `[Request]: POST https://…`, `[Response]:`, `[Status Code]: 201`, `[Network Duration]: 0.3s` |
+| Moya | Moya's `NetworkLoggerPlugin` | `Moya_Logger: [date] Request: https://…`, `HTTP Request Method: POST`, `Response: <NSHTTPURLResponse …> { Status Code: 201 …` |
+
+On iOS, saw reads the unified log, not stdout, and most iOS loggers `print` by default, which no
+tool can read from a device. Send them to the log instead: Moya's plugin takes an `output:` closure
+(`NetworkLoggerPlugin(configuration: .init(output: { _, items in items.forEach { NSLog("%@", $0) } }, logOptions: .verbose))`),
+and Alamofire's `debugDescription` can be logged with `NSLog` or a `Logger` with
+`privacy: .public`. Pulse, netfox and Wormholy keep requests in their own stores, so there's
+nothing in the log for saw to read.
 
 Other HTTP-looking lines the app logs (with a URL or a status code in them) appear as `LOG` lines.
 
