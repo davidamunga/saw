@@ -264,13 +264,13 @@ func streamCmd(ctx context.Context, args []string) error {
 			printer.Print(e)
 		})
 	}
-	return w.run(ctx, app.Name, func(ctx context.Context, dev device.Device) error {
+	return w.run(ctx, app.Name, func(ctx context.Context, dev device.Device, since time.Time) error {
 		// Crash reports show up in the stream too, since the app's own log misses native
-		// crashes, ANRs and iOS crashes.
+		// crashes, ANRs and iOS crashes. After a reconnect, since is when the device went away.
 		ctx, stop := context.WithCancel(ctx)
 		done := make(chan struct{})
 		defer func() { stop(); <-done }()
-		start := w.since
+		start := since
 		if start.IsZero() {
 			start = now()
 		}
@@ -280,7 +280,7 @@ func streamCmd(ctx context.Context, args []string) error {
 		}()
 		return source.Stream(ctx, source.Spec{
 			Device: dev, App: app, Subsystem: cfg.Subsystem(app),
-			Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all, Since: w.since,
+			Scopes: selected, Chosen: chosen, TagFor: cfg.TagFor(), All: *all, Since: since,
 			OnStart: w.onStart(app.Name, dev), OnLive: w.onLive(dev),
 		}, emit)
 	})
@@ -393,9 +393,9 @@ func netCmd(ctx context.Context, args []string) error {
 			}
 		})
 	}
-	err = w.run(ctx, app.Name+" network", func(ctx context.Context, dev device.Device) error {
+	err = w.run(ctx, app.Name+" network", func(ctx context.Context, dev device.Device, since time.Time) error {
 		return source.StreamNet(ctx, source.Spec{
-			Device: dev, App: app, Subsystem: cfg.Subsystem(app), Since: w.since,
+			Device: dev, App: app, Subsystem: cfg.Subsystem(app), Since: since,
 			OnStart: w.onStart(app.Name+" network", dev), OnLive: w.onLive(dev),
 		}, emit)
 	})
@@ -582,6 +582,8 @@ type watch struct {
 	sorting bool
 	live    map[string]bool // devices whose history is in (or that failed)
 	held    []heldLine
+
+	started map[string]bool // devices streaming now (see follow)
 }
 
 type heldLine struct {
@@ -659,6 +661,10 @@ func (w *watch) onStart(what string, dev device.Device) func() {
 			hint = w.hint()
 		}
 		fmt.Fprintf(stderr, "saw: %s on %s %s%s\n", what, dev.Name, dev.OS, hint)
+		if w.started == nil {
+			w.started = map[string]bool{}
+		}
+		w.started[dev.ID] = true
 		w.mu.Unlock()
 	}
 }
@@ -697,12 +703,12 @@ func (w *watch) show(text string, print func()) {
 
 // run reads every device, each with read, until they end, --until matches or --for is up. One
 // device failing doesn't stop the others.
-func (w *watch) run(ctx context.Context, what string, read func(context.Context, device.Device) error) error {
+func (w *watch) run(ctx context.Context, what string, read readFunc) error {
 	ctx, w.cancel = context.WithCancel(ctx)
 	defer w.cancel()
 	w.live = map[string]bool{}
 	if len(w.devs) == 1 {
-		if err := read(ctx, w.devs[0]); err != nil {
+		if err := w.follow(ctx, w.devs[0], read); err != nil {
 			return err
 		}
 	} else {
@@ -714,7 +720,7 @@ func (w *watch) run(ctx context.Context, what string, read func(context.Context,
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := read(ctx, d); err != nil {
+				if err := w.follow(ctx, d, read); err != nil {
 					w.mu.Lock()
 					failed++
 					fmt.Fprintf(stderr, "saw: %s: %v\n", d.Name, err)
