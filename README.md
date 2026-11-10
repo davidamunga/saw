@@ -382,12 +382,8 @@ go test ./...
 go build -o bin/saw ./cmd/saw
 ```
 
-Tests run saw against fake `adb`, `xcrun` and `pymobiledevice3` (see `internal/runtest`), so they
-need no devices; `testdata/` holds real captured log output for the parsers.
-
-To release, tag and push: `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. The release
-workflow builds every platform with GoReleaser, publishes a GitHub release and updates the Homebrew
-tap.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how tests work, changesets and releasing, and
+[CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## License
 

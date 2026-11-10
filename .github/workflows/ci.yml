@@ -20,3 +20,27 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./cmd/saw
+
+  # Pull requests that change saw's code need a changeset (see CONTRIBUTING.md).
+  changeset:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check for a changeset
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE"...HEAD)
+          if ! grep -qE '^(cmd/|internal/|go\.mod$)' <<<"$changed"; then
+            echo "No code changes, so no changeset needed."
+            exit 0
+          fi
+          added=$(git diff --name-only --diff-filter=A "$BASE"...HEAD -- '.changeset/*.md')
+          if [ -z "$added" ]; then
+            echo "::error::This pull request changes saw's code but adds no changeset. Add one: changeset add (see CONTRIBUTING.md)."
+            exit 1
+          fi
+          echo "Changesets: $added"
