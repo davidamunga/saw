@@ -4,6 +4,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -107,5 +108,11 @@ func (s Spec) keepIOS(e event.Event) bool {
 		return e.Subsystem == s.Subsystem
 	}
 	// Apple subsystems are dropped even from inside the bundle (Xcode's debug stub logs there).
-	return strings.Contains(e.Sender, ".app/") && !strings.HasPrefix(e.Subsystem, "com.apple.")
+	return nsLog(e) || strings.Contains(e.Sender, ".app/") && !strings.HasPrefix(e.Subsystem, "com.apple.")
+}
+
+// nsLog reports whether a line was logged with NSLog, which logs from Foundation, not from the
+// code that called it, and with no subsystem.
+func nsLog(e event.Event) bool {
+	return e.Subsystem == "" && path.Base(e.Sender) == "Foundation"
 }

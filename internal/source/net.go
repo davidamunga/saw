@@ -68,7 +68,8 @@ func (s Spec) netIOSLine(e event.Event, cf *cfNetwork, logged *httpLog, send fun
 		send(n)
 		return
 	}
-	if !strings.HasPrefix(e.Subsystem, "com.apple.") && s.keepIOS(e) {
+	// The app's HTTP logging may go through NSLog even when it uses a Logger subsystem otherwise.
+	if !strings.HasPrefix(e.Subsystem, "com.apple.") && (s.keepIOS(e) || nsLog(e)) {
 		appHTTPLog(e, logged, send)
 	}
 }

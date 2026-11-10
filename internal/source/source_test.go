@@ -130,7 +130,10 @@ func TestKeepIOSWithoutConvention(t *testing.T) {
 		e    event.Event
 		want bool
 	}{
-		{"NSLog from the app", event.Event{Sender: app + "MyApp"}, true},
+		{"os_log from the app", event.Event{Sender: app + "MyApp"}, true},
+		// NSLog logs from Foundation, with no subsystem.
+		{"NSLog", event.Event{Sender: "/System/Library/Frameworks/Foundation.framework/Foundation"}, true},
+		{"Foundation's own lines", event.Event{Subsystem: "com.apple.Foundation", Sender: "/System/Library/Frameworks/Foundation.framework/Foundation"}, false},
 		{"os_log in a shipped framework", event.Event{Sender: app + "Frameworks/React.framework/React"}, true},
 		{"Logger with the app's subsystem", event.Event{Subsystem: "com.x.app", Sender: app + "MyApp.debug.dylib"}, true},
 		{"third-party subsystem", event.Event{Subsystem: "com.facebook.react.log", Sender: app + "Frameworks/React.framework/React"}, true},
@@ -149,6 +152,11 @@ func TestKeepIOSWithoutConvention(t *testing.T) {
 	s = Spec{Subsystem: "com.x.app"} // the convention: only the app's subsystem
 	if s.keepIOS(event.Event{Sender: app + "MyApp"}) || !s.keepIOS(event.Event{Subsystem: "com.x.app"}) {
 		t.Error("subsystem filter")
+	}
+	// saw net still takes HTTP logging sent through NSLog.
+	nslog := event.Event{Sender: "/System/Library/Frameworks/Foundation.framework/Foundation"}
+	if s.keepIOS(nslog) || !nsLog(nslog) {
+		t.Error("NSLog with a subsystem convention")
 	}
 }
 
