@@ -22,6 +22,8 @@ simulator, or iPhone/iPad, with one command.
 - **Survives restarts and crashes.** Relaunch the app and the stream carries on.
 - **Looks back.** `--since 5m` shows what already happened: the crash on launch, the request that
   just failed.
+- **Every crash.** `saw crashes` finds the crashes the app's log misses: native crashes and ANRs
+  on Android, crash reports on iOS.
 - **Every device at once.** `--device all` follows the app on Android and iOS together.
 - **Made for terminals and scripts.** Aligned, copiable output for people; `--json`, `--grep`,
   `--until` and `--for` for scripts, CI and agents.
@@ -56,6 +58,7 @@ saw net --app com.example.app                                # the app's network
 saw net --app com.example.app --full                         # ... with headers and bodies, as plain HTTP
 saw stream --app com.example.app --since 5m --grep checkout  # the last 5 minutes, about checkout
 saw net --app com.example.app --device all                   # requests from every device at once
+saw crashes --app com.example.app                            # crash reports, newest first
 ```
 
 `--app` takes an Android package name or iOS bundle id, or a short name from [`saw.json`](#sawjson).
@@ -134,6 +137,14 @@ curl -X POST 'https://api.example.com/v1/payments' \
   --data-raw '{"order":"1042","amount":2400}'
 ```
 
+`--har session.har` also saves the requests to a [HAR](https://en.wikipedia.org/wiki/HAR_(file_format))
+file as they come, while printing as usual. Open it in Chrome DevTools (Network tab, Import HAR),
+Proxyman, Charles or Insomnia, or attach it to a bug report:
+
+```sh
+saw net --app com.example.app --for 1m --har session.har
+```
+
 saw knows three logging formats:
 
 | Format | Used by | Looks like |
@@ -170,6 +181,32 @@ the device:
 HTTPS stays encrypted on the network, so this view shows where the app connects and how requests
 went, not their contents. Once the app has logged a request, these lines stop, since the logged
 requests say more; `--connections` keeps them.
+
+## Crashes: `saw crashes`
+
+Lists the app's crash reports on the device, newest first, including the crashes its own log
+doesn't show: native crashes and ANRs on Android, and every crash on iOS, which writes them to
+a report file rather than the log.
+
+```
+$ saw crashes --app com.example.app
+2026-11-10 15:02:12  native  SIGSEGV in libexample.so (parse_frame+88)
+2026-11-10 14:51:07  crash   java.lang.IllegalStateException: cart is empty
+2026-11-09 18:20:05  anr     Input dispatching timed out: waited 5002ms for MotionEvent
+```
+
+`--last` prints the newest report in full, with its stack trace; `--json` prints every report in
+full, one per line; `--since 24h` leaves out older ones. `--device all` reads every device.
+
+| Device | Reports | From |
+|---|---|---|
+| Android | Java/Kotlin crashes, native crashes, ANRs (the app not responding) | the system's dropbox, via `adb shell dumpsys dropbox` |
+| iOS simulator (macOS) | crashes, with symbol names | the `.ips` reports macOS writes in `~/Library/Logs/DiagnosticReports` |
+| iPhone / iPad | crashes, including iOS killing the app (watchdog) | the device's `.ips` reports, copied with `pymobiledevice3 crash` |
+
+For a crash with a message (an uncaught exception, a Swift `fatalError`, a native abort), the
+summary is that message; otherwise it's the signal and the app's own frame closest to the crash.
+Devices keep a limited number of reports, so old ones drop off.
 
 ## Look back, filter, stop, and several devices
 
@@ -251,7 +288,8 @@ listed, `--app` can be left out. A misspelled key or scope is an error, not sile
 |---|---|
 | `saw devices` | `--all` includes shut-down simulators; `--json` |
 | `saw stream` | `--app`, `--scope a,b` (repeatable), `--level verbose\|debug\|info\|warn\|error\|fatal`, `--exclude-tag a,b`, `--all`, `--json`, and the shared flags |
-| `saw net` | `--app`, one of `--full`, `--curl` or `--json`; `--connections`, and the shared flags |
+| `saw net` | `--app`, one of `--full`, `--curl` or `--json`; `--har <file>`, `--connections`, and the shared flags |
+| `saw crashes` | `--app`, `--device`, `--platform`, `--since`, and one of `--last` or `--json` |
 | `saw doctor` | |
 | `saw version` | |
 
@@ -292,6 +330,16 @@ or part of its name (`pixel`, `"17 pro"`); several separated by commas; or `all`
 | `request_headers`, `request_body`, `response_headers`, `response_body` | For logged requests: what the app's logging included. |
 | `host`, `ip`, `port`, `protocol`, `bytes`, `connection`, `cached` | Network details, where the platform gives them. |
 | `log`, `tag`, `level` | For `log` lines: the line, its tag or category, and its level. |
+
+`saw crashes --json`, one report per line:
+
+| Field | Meaning |
+|---|---|
+| `time`, `platform`, `device`, `process` | When and where the app crashed. |
+| `kind` | `crash`, `native` (Android native code) or `anr` (Android: the app stopped responding). |
+| `summary` | The exception, message or signal, in one line. |
+| `report` | The whole report, readable, with stack traces. |
+| `file` | iOS simulator: the `.ips` report on this computer. |
 
 ## How it works
 
