@@ -273,6 +273,30 @@ so and carries on with the others.
 down), saw says so and waits for it, then carries on. Android devices and simulators keep their
 logs, so the lines from while it was away come first; an iPhone picks up live.
 
+## Using saw with coding agents
+
+Claude Code, Cursor, Codex and other agents that run shell commands can use saw as it is: `--since`
+reads what already happened, `--for` and `--until` make each command return, and `--json` is easy
+to parse. An agent can reproduce a bug, then check the app's errors, the failing request and any
+crash itself, and after a fix confirm it in the running app:
+
+```sh
+saw stream --device pixel --since 2m --level warn --for 1s
+saw net --device pixel --since 2m --grep " 4[0-9][0-9] " --full --for 1s
+saw crashes --device pixel --last
+```
+
+To teach your agent saw, add [`skills/saw/SKILL.md`](skills/saw/SKILL.md) to your project. It
+covers the commands, the rules that keep them from hanging (always `--for` or `--until`, always
+`--device`), and a debugging loop.
+
+- **Claude Code:** save it as a skill:
+  ```sh
+  mkdir -p .claude/skills/saw && curl -fsSL https://raw.githubusercontent.com/davidamunga/saw/main/skills/saw/SKILL.md -o .claude/skills/saw/SKILL.md
+  ```
+- **Other agents:** paste it, without the `---` header, into `AGENTS.md` (or `CLAUDE.md`,
+  `.cursor/rules`).
+
 ## saw.json
 
 Optional. It gives a project's apps short names and lists its log scopes, so a team can run
