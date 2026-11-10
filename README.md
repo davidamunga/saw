@@ -19,7 +19,8 @@ simulator, or iPhone/iPad, with one command.
 - **Your app only.** No filters to write: saw keeps your app's lines and drops the system's.
 - **Full HTTP requests.** Method, URL, status, headers and bodies, from the logging debug builds
   already do, ready to copy as plain HTTP or curl. No proxy, no certificates, no app changes.
-- **Survives restarts and crashes.** Relaunch the app and the stream carries on.
+- **Survives restarts, crashes and disconnects.** Relaunch the app, unplug the phone or shut down
+  the simulator, and the stream carries on when it's back.
 - **Looks back.** `--since 5m` shows what already happened: the crash on launch, the request that
   just failed.
 - **Every crash.** `saw crashes` finds the crashes the app's log misses: native crashes and ANRs
@@ -250,6 +251,10 @@ history from every device is printed in time order.
 
 If one device can't be read (the app isn't installed, or it's an iPhone with `--since`), saw says
 so and carries on with the others.
+
+**Reconnecting.** When a device goes away mid-stream (unplugged, Wi-Fi dropped, simulator shut
+down), saw says so and waits for it, then carries on. Android devices and simulators keep their
+logs, so the lines from while it was away come first; an iPhone picks up live.
 
 ## saw.json
 

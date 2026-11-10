@@ -16,7 +16,10 @@ import (
 	"github.com/davidamunga/saw/internal/runtest"
 )
 
-func TestMain(m *testing.M) { runtest.Main(m) }
+func TestMain(m *testing.M) {
+	reconnect = false // fake streams end; see follow_test.go
+	runtest.Main(m)
+}
 
 // saw runs the CLI with stdin, returning stdout, stderr and the error.
 func saw(t *testing.T, in string, args ...string) (string, string, error) {
