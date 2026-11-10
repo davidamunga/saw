@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davidamunga/saw/internal/crash"
 	"github.com/davidamunga/saw/internal/device"
 	"github.com/davidamunga/saw/internal/event"
 	"github.com/davidamunga/saw/internal/runtest"
@@ -535,5 +536,16 @@ func TestCrashesSeveralDevices(t *testing.T) {
 	twoPhones(t, runtest.Rule{Cmd: "adb -s S1 shell dumpsys", Stderr: "offline", Exit: 1})
 	if _, _, err := saw(t, "", "crashes", "--app", "com.example.app", "--device", "S1"); err == nil || !strings.Contains(err.Error(), "offline") {
 		t.Errorf("one device: got %v", err)
+	}
+}
+
+func TestCrashEvent(t *testing.T) {
+	e := crashEvent(crash.Report{Kind: "native", Summary: "SIGSEGV in libexample.so", Device: "Pixel 8", Platform: "android"})
+	if e.Level != event.Fatal || e.Tag != "CRASH" || e.Device != "Pixel 8" ||
+		e.Message != "native crash: SIGSEGV in libexample.so (saw crashes --last for the report)" {
+		t.Errorf("got %+v", e)
+	}
+	if e := crashEvent(crash.Report{Kind: "anr", Summary: "x"}); !strings.HasPrefix(e.Message, "not responding (ANR): x") {
+		t.Errorf("got %q", e.Message)
 	}
 }

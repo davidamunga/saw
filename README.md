@@ -209,6 +209,14 @@ For a crash with a message (an uncaught exception, a Swift `fatalError`, a nativ
 summary is that message; otherwise it's the signal and the app's own frame closest to the crash.
 Devices keep a limited number of reports, so old ones drop off.
 
+`saw stream` shows new crash reports as they appear, too, as one line pointing to the full report:
+
+```
+09:41:07.000 F CRASH              native crash: SIGSEGV in libexample.so (parse_frame+88) (saw crashes --last for the report)
+```
+
+It checks every few seconds; on iOS the report itself takes 10 to 20 seconds to be written.
+
 ## Look back, filter, stop, and several devices
 
 These work with both `saw stream` and `saw net`.

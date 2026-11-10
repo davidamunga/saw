@@ -251,31 +251,40 @@ func simulator(dev device.Device, app config.App) ([]Report, error) {
 }
 
 func iosDevice(ctx context.Context, dev device.Device, app config.App) ([]Report, error) {
+	process, names, err := deviceReportNames(ctx, dev, app)
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+	return pullReports(ctx, dev, app, "^"+regexp.QuoteMeta(process)+"-.*\\.ips$")
+}
+
+// deviceReportNames lists the app's crash report files on an iPhone or iPad.
+func deviceReportNames(ctx context.Context, dev device.Device, app config.App) (string, []string, error) {
 	process, err := source.AppProcess(ctx, dev, app)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	out, err := run.Output(ctx, "pymobiledevice3", "crash", "ls", "--udid", dev.ID)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	found := false
+	var names []string
 	for _, l := range strings.Split(out, "\n") {
 		base := filepath.Base(strings.TrimSpace(l))
 		if strings.HasPrefix(base, process+"-") && strings.HasSuffix(base, ".ips") {
-			found = true
-			break
+			names = append(names, base)
 		}
 	}
-	if !found {
-		return nil, nil
-	}
+	return process, names, nil
+}
+
+// pullReports copies the crash reports whose names match off the device, and reads them.
+func pullReports(ctx context.Context, dev device.Device, app config.App, match string) ([]Report, error) {
 	dir, err := os.MkdirTemp("", "saw-crashes-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	match := "^" + regexp.QuoteMeta(process) + "-.*\\.ips$"
 	if _, err := run.Output(ctx, "pymobiledevice3", "crash", "pull", "--udid", dev.ID, "--match", match, dir); err != nil {
 		return nil, err
 	}
